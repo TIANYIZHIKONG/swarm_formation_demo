@@ -1,0 +1,19 @@
+<launch>
+  <!-- 多机编队专用 RViz
+       固定坐标系用 world (和 FAST-LIO 平移后的公共世界系一致).
+       想看哪一架, 就在 Displays 里勾对应的项; 颜色与 Gazebo/规划器一致.
+         编队阵位/轨迹: /drone_<i>_ego_planner_node/{goal_point,global_list,optimal_list}
+         机体 + 飞行路径: /drone_<i>_odom_visualization/{robot,path}
+         点云(世界系): /drone_<i>_pcl_render_node/cloud   ← 默认开着的就是它, 可直接叠在
+                       网格/柱子上; vio_offset 已经把 camera_init 平移回 world
+         建图点云(世界系): /drone_<i>_ego_planner_node/grid_map/occupancy_inflate (默认关, 吃 CPU)
+         FAST-LIO 原生两条: /drone_<i>/cloud_registered       -> frame camera_init
+                            /drone_<i>/cloud_registered_body  -> frame body
+           (多机下 camera_init/body 三个 frame 名被 3 架共用, 且没有 world->camera_init 的
+            TF, Fixed Frame=world 时显示会报 "No transform"; 单机自看就把 Fixed Frame
+            临时改成 camera_init. Gazebo 原始雷达 /drone_<i>/points 的 frame 是
+            drone_lidar_link, 同理需要切 Fixed Frame)
+       -->
+  <node name="rviz" pkg="rviz" type="rviz"
+        args="-d $(find sim_utils)/rviz/formation.rviz" required="true"/>
+</launch>

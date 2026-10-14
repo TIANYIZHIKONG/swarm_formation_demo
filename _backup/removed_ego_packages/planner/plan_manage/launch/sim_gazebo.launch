@@ -1,0 +1,138 @@
+<launch>
+  <!-- ============================================================
+       ego-planner-swarm 在 Gazebo/PX4 仿真里的启动文件
+       （不使用自带的 mockamap / pcl_render_node / poscmd_2_odom 仿真器）
+
+       输入（由 FAST-LIO 提供）:
+         /Odometry          -> relay -> /drone_0_visual_slam/odom
+         /cloud_registered  -> relay -> /drone_0_pcl_render_node/cloud
+       输出:
+         /drone_0_planning/pos_cmd  (quadrotor_msgs/PositionCommand)
+         由 to_mavros/poscmd2mavros.launch 转成 mavros 的 offboard setpoint
+       ============================================================ -->
+
+  <arg name="drone_id"        default="0"/>
+  <arg name="map_size_x"      default="40.0"/>
+  <arg name="map_size_y"      default="40.0"/>
+  <arg name="map_size_z"      default="3.0"/>
+
+  <arg name="odom_topic"      default="visual_slam/odom"/>
+  <arg name="cloud_topic"     default="pcl_render_node/cloud"/>
+
+  <!-- 起点：直接取 FAST-LIO 的原点，所以就是 (0,0,0)
+       航点必须落在 ego_sim.world 的空旷处(见该文件顶部布局图)：
+       x=±5 各有一道横墙，仅在 y∈[-1.5,1.5] 留 3 m 门洞，所以沿 y=0 飞。
+       (8,0) 在两道墙之外的空地；(-8,0) 同理；最后回原点。 -->
+  <arg name="point_num"       default="2"/>
+  <arg name="point0_x"        default="8.0"/>
+  <arg name="point0_y"        default="0.0"/>
+  <arg name="point0_z"        default="1.0"/>
+  <arg name="point1_x"        default="-8.0"/>
+  <arg name="point1_y"        default="0.0"/>
+  <arg name="point1_z"        default="1.0"/>
+  <arg name="point2_x"        default="0.0"/>
+  <arg name="point2_y"        default="0.0"/>
+  <arg name="point2_z"        default="1.0"/>
+
+  <arg name="max_vel"         default="2.0"/>
+  <arg name="max_acc"         default="3.0"/>
+  <arg name="planning_horizon" default="7.5"/>
+
+  <!-- 飞行模式:
+         2 = 自动依次飞下面预设的航点 (无人值守, 适合回归测试)
+         1 = 只在 RViz 里用 "2D Nav Goal" 手动点目标点
+             · RViz 的 Fixed Frame 已配成 world, 与 planner 的 camera_init 完全重合;
+             · default.rviz 里已有 rviz/SetGoal 工具, Topic = /move_base_simple/goal;
+             · 目标点 z 会被 ego_replan_fsm.cpp 强制成 1.0 m(忽略 RViz 给的值), 不会撞地;
+             · 到达后原地悬停, 可以再点下一个点, 支持连续下发多个目标。 -->
+  <arg name="flight_type"     default="2"/>
+
+  <!-- 目标点安全检查(见 ego_replan_fsm.cpp::checkGoalSafety()):
+       false(默认) = 只拒绝"占据/膨胀层/出地图"的目标点, 未观测/盒外的点给 WARN 后放行;
+       true        = 连"未观测(unknown)/本地地图盒外"的目标点也拒绝。 -->
+  <arg name="goal_check_strict" default="false"/>
+
+  <!-- 目标点视线检查: 邻域无法验证时, 无人机->目标点直线若穿过已知占据空间(目标在墙后)
+       -> 拒绝(局部规划器会规划穿墙轨迹)。false = 关掉。 -->
+  <arg name="goal_check_los" default="true"/>
+
+  <!-- main algorithm params -->
+  <include file="$(find ego_planner)/launch/advanced_param.xml">
+    <arg name="drone_id"       value="$(arg drone_id)"/>
+    <arg name="map_size_x_"    value="$(arg map_size_x)"/>
+    <arg name="map_size_y_"    value="$(arg map_size_y)"/>
+    <arg name="map_size_z_"    value="$(arg map_size_z)"/>
+    <arg name="odometry_topic" value="$(arg odom_topic)"/>
+    <arg name="obj_num_set"    value="0"/>
+    <arg name="goal_check_strict" value="$(arg goal_check_strict)"/>
+    <arg name="goal_check_los"    value="$(arg goal_check_los)"/>
+
+    <!-- 只用点云, 不用深度图 -->
+    <arg name="camera_pose_topic" value="pcl_render_node/camera_pose"/>
+    <arg name="depth_topic"      value="pcl_render_node/depth"/>
+    <arg name="cloud_topic"      value="$(arg cloud_topic)"/>
+
+    <!-- 深度相机内参(PX4 iris 上并没有真实深度相机, 这里只是占位) -->
+    <arg name="cx" value="321.04638671875"/>
+    <arg name="cy" value="243.44969177246094"/>
+    <arg name="fx" value="387.229248046875"/>
+    <arg name="fy" value="387.229248046875"/>
+
+    <arg name="max_vel"          value="$(arg max_vel)"/>
+    <arg name="max_acc"          value="$(arg max_acc)"/>
+    <arg name="planning_horizon" value="$(arg planning_horizon)"/>
+    <arg name="use_distinctive_trajs" value="true"/>
+
+    <!-- 2: 使用下面预设的全局航点 (1: 用 RViz 的 2D Nav Goal 手动选点) -->
+    <arg name="flight_type" value="$(arg flight_type)"/>
+    <arg name="point_num"   value="$(arg point_num)"/>
+    <arg name="point0_x"    value="$(arg point0_x)"/>
+    <arg name="point0_y"    value="$(arg point0_y)"/>
+    <arg name="point0_z"    value="$(arg point0_z)"/>
+    <arg name="point1_x"    value="$(arg point1_x)"/>
+    <arg name="point1_y"    value="$(arg point1_y)"/>
+    <arg name="point1_z"    value="$(arg point1_z)"/>
+    <arg name="point2_x"    value="$(arg point2_x)"/>
+    <arg name="point2_y"    value="$(arg point2_y)"/>
+    <arg name="point2_z"    value="$(arg point2_z)"/>
+    <arg name="point3_x"    value="0.0"/>
+    <arg name="point3_y"    value="0.0"/>
+    <arg name="point3_z"    value="1.0"/>
+    <arg name="point4_x"    value="0.0"/>
+    <arg name="point4_y"    value="0.0"/>
+    <arg name="point4_z"    value="1.0"/>
+  </include>
+
+  <!-- trajectory server: 把 bspline 变成 pos_cmd -->
+  <node pkg="ego_planner" name="drone_$(arg drone_id)_traj_server" type="traj_server" output="screen">
+    <remap from="position_cmd" to="drone_$(arg drone_id)_planning/pos_cmd"/>
+    <remap from="~planning/bspline" to="drone_$(arg drone_id)_planning/bspline"/>
+    <param name="traj_server/time_forward" value="1.0" type="double"/>
+  </node>
+
+  <!-- FAST-LIO 输出 -> ego-planner 需要的名字 -->
+  <node pkg="topic_tools" type="relay" name="relay_odom" output="log"
+        args="/Odometry /drone_$(arg drone_id)_$(arg odom_topic)"/>
+  <node pkg="topic_tools" type="relay" name="relay_cloud" output="log"
+        args="/cloud_registered /drone_$(arg drone_id)_$(arg cloud_topic)"/>
+
+  <!-- FAST-LIO 的 camera_init 与 Gazebo world 原点重合(同点起飞)，补一个静态 TF 方便 RViz -->
+  <node pkg="tf" type="static_transform_publisher" name="world_to_camera_init"
+        args="0 0 0 0 0 0 world camera_init 100"/>
+
+  <!-- RViz 里的机体 mesh + 飞行路径。
+       话题 /drone_0_odom_visualization/robot、/path、/pose 正是 default.rviz
+       里已经配好、但之前一直是空的那几个显示项。
+       frame_id=world: 与 planner 的 camera_init 完全重合(见上面的静态 TF),
+       所以 mesh 画在 Gazebo 里的真实位置上, 手动点目标时能看清无人机在哪。 -->
+  <node pkg="odom_visualization" name="drone_$(arg drone_id)_odom_visualization"
+        type="odom_visualization" output="log">
+    <remap from="~odom" to="/drone_$(arg drone_id)_$(arg odom_topic)"/>
+    <param name="frame_id"   value="world"/>
+    <param name="color/r"    value="1.0"/>
+    <param name="color/g"    value="0.0"/>
+    <param name="color/b"    value="0.0"/>
+    <param name="color/a"    value="0.8"/>
+    <param name="robot_scale" value="1.5"/>
+  </node>
+</launch>

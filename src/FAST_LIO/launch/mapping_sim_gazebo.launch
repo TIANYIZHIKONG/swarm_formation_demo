@@ -1,0 +1,27 @@
+<launch>
+    <!-- Gazebo + PX4 SITL 场景下运行 FAST-LIO
+         输入: /drone_0/points (PointCloud2, 来自 iris_lidar3d 的 3D LiDAR)
+               /drone_0/imu    (sensor_msgs/Imu, 来自 iris_lidar3d 的 IMU)
+         输出: /Odometry          (nav_msgs/Odometry, frame: camera_init)
+               /cloud_registered  (PointCloud2,   frame: camera_init)
+    -->
+
+    <arg name="rviz" default="false" />
+
+    <rosparam command="load" file="$(find fast_lio)/config/sim_gazebo.yaml" />
+
+    <param name="feature_extract_enable" type="bool" value="0"/>
+    <param name="point_filter_num" type="int" value="3"/>
+    <param name="max_iteration" type="int" value="4" />
+    <param name="filter_size_surf" type="double" value="0.3" />
+    <param name="filter_size_map" type="double" value="0.3" />
+    <param name="cube_side_length" type="double" value="1000" />
+    <param name="runtime_pos_log_enable" type="bool" value="0" />
+
+    <node pkg="fast_lio" type="fastlio_mapping" name="laserMapping" output="screen" />
+
+    <group if="$(arg rviz)">
+        <node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz_fastlio"
+              args="-d $(find fast_lio)/rviz_cfg/loam_livox.rviz" />
+    </group>
+</launch>

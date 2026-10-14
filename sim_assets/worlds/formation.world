@@ -1,0 +1,903 @@
+<?xml version="1.0" ?>
+<sdf version="1.5">
+  <world name="formation">
+    <include>
+      <uri>model://sun</uri>
+    </include>
+    <include>
+      <uri>model://ground_plane</uri>
+    </include>
+
+    <!-- 物理参数必须和 PX4 自带 empty.world / ego_sim.world 保持一致, 特别
+         是 <magnetic_field>: 少了它 Gazebo 的 fake mag 输出无效 -> EKF2 报
+         "Preflight Fail: Yaw estimate error" -> PX4 拒绝解锁.
+         多机时每架都要能解锁, 所以这里一个都不能少. -->
+    <physics name="default_physics" default="0" type="ode">
+      <gravity>0 0 -9.8066</gravity>
+      <ode>
+        <solver>
+          <type>quick</type>
+          <iters>10</iters>
+          <sor>1.3</sor>
+          <use_dynamic_moi_rescaling>0</use_dynamic_moi_rescaling>
+        </solver>
+        <constraints>
+          <cfm>0</cfm>
+          <erp>0.2</erp>
+          <contact_max_correcting_vel>100</contact_max_correcting_vel>
+          <contact_surface_layer>0.001</contact_surface_layer>
+        </constraints>
+      </ode>
+      <max_step_size>0.004</max_step_size>
+      <real_time_factor>1</real_time_factor>
+      <real_time_update_rate>250</real_time_update_rate>
+      <magnetic_field>6.0e-6 2.3e-5 -4.2e-5</magnetic_field>
+    </physics>
+
+    <gui>
+      <camera name="user_camera">
+        <pose>-14 -16 10 0 0.38 2.4</pose>
+      </camera>
+    </gui>
+
+
+    <model name="pillar_p8">
+      <static>true</static>
+      <pose>4 8 1.5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.4</radius><length>3</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.4</radius><length>3</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_pm8">
+      <static>true</static>
+      <pose>4 -8 1.5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.4</radius><length>3</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.4</radius><length>3</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_w6">
+      <static>true</static>
+      <pose>-8 6 1.5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.4</radius><length>3</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.4</radius><length>3</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_wm6">
+      <static>true</static>
+      <pose>-8 -6 1.5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.4</radius><length>3</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.4</radius><length>3</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+    <!-- ==================== OBSTACLES:BEGIN (本区块由 scripts/gen_formation_world.py 生成, 不要手改) ==================== -->
+    <!-- 生成参数: seed=20261013  min_gap=1.2  jitter=0.15  darts=1500  big_frac=0.08  rmax=0.8  spacing=2.30 (完整命令见生成时的 stdout) -->
+    <!-- 参数: seed=20261013  min_gap=1.20 m  柱子数=77 (本区块新增 73 + 区块外原有 4) -->
+    <!-- 候选点统计: 候选点=1599  跳过(留空)=278  放不下=1248  大树=81 -->
+    <!-- 半径: 最小 0.20 m / 平均 0.39 m / 最大 0.77 m ; 障碍占地覆盖率 7.4% -->
+    <!-- 全场最小表面缝 = 1.200 m ; 可飞临界 1.4 m = 膨胀 0.2x2 + 机体宽 0.7 + 余量 -->
+    <!-- 布局: 抖动网格 + 密度场随机留空 (聚簇处更密更粗); 原起飞区 x[-1.8,1.8] y[-1.8,9.8] 与集结空地 P_集结空地 x[3.6,12.6] y[-3.4,4.6] 已挖空 -->
+    <!-- 想换布局或看俯视图, 重跑 scripts/gen_formation_world.py 即可 (dry run 只看不写) -->
+
+    <!-- 区块外原有 4 根柱子 (pillar_p8/pm8/w6/wm6, 在上面的手写区里) 原样保留, 它们已经算进全场最小缝和避让保证了, 这里不再重复写一遍 -->
+    <!-- 以下 73 根新柱子: 抖动网格铺底 + 密度场随机留空 + 随机飞镖填缝 -->
+    <model name="pillar_g000">
+      <static>true</static>
+      <pose>-6.439 -7.033 1.451 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.272</radius><length>2.901</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.272</radius><length>2.901</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g001">
+      <static>true</static>
+      <pose>-6.780 -3.198 1.482 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.774</radius><length>2.965</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.774</radius><length>2.965</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g002">
+      <static>true</static>
+      <pose>7.519 -10.265 1.283 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.735</radius><length>2.566</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.735</radius><length>2.566</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g003">
+      <static>true</static>
+      <pose>-9.350 7.640 1.276 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.524</radius><length>2.552</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.524</radius><length>2.552</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g004">
+      <static>true</static>
+      <pose>-3.491 6.023 1.663 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.691</radius><length>3.327</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.691</radius><length>3.327</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g005">
+      <static>true</static>
+      <pose>-9.551 -0.241 1.728 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.710</radius><length>3.456</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.710</radius><length>3.456</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g006">
+      <static>true</static>
+      <pose>-9.664 -6.727 1.358 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.216</radius><length>2.715</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.216</radius><length>2.715</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g007">
+      <static>true</static>
+      <pose>6.846 -4.935 1.453 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.535</radius><length>2.906</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.535</radius><length>2.906</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g008">
+      <static>true</static>
+      <pose>11.237 -8.474 1.608 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.678</radius><length>3.217</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.678</radius><length>3.217</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g009">
+      <static>true</static>
+      <pose>-0.956 -9.558 1.284 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.674</radius><length>2.569</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.674</radius><length>2.569</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g010">
+      <static>true</static>
+      <pose>11.848 -4.970 1.618 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.570</radius><length>3.235</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.570</radius><length>3.235</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g011">
+      <static>true</static>
+      <pose>-5.764 -9.535 1.694 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.659</radius><length>3.389</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.659</radius><length>3.389</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g012">
+      <static>true</static>
+      <pose>-12.645 8.109 1.255 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.355</radius><length>2.510</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.355</radius><length>2.510</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g013">
+      <static>true</static>
+      <pose>0.052 -4.312 1.572 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.626</radius><length>3.144</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.626</radius><length>3.144</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g014">
+      <static>true</static>
+      <pose>-6.625 10.210 1.504 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.609</radius><length>3.009</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.609</radius><length>3.009</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g015">
+      <static>true</static>
+      <pose>-9.050 -3.928 1.251 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.411</radius><length>2.502</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.411</radius><length>2.502</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g016">
+      <static>true</static>
+      <pose>9.641 -5.788 1.382 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.582</radius><length>2.764</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.582</radius><length>2.764</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g017">
+      <static>true</static>
+      <pose>-4.964 -1.777 1.575 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.332</radius><length>3.150</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.332</radius><length>3.150</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g018">
+      <static>true</static>
+      <pose>-11.475 1.605 1.554 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.583</radius><length>3.108</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.583</radius><length>3.108</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g019">
+      <static>true</static>
+      <pose>7.674 -8.117 1.408 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.218</radius><length>2.815</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.218</radius><length>2.815</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g020">
+      <static>true</static>
+      <pose>7.374 6.219 1.692 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.564</radius><length>3.384</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.564</radius><length>3.384</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g021">
+      <static>true</static>
+      <pose>-3.896 3.219 1.389 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.559</radius><length>2.777</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.559</radius><length>2.777</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g022">
+      <static>true</static>
+      <pose>-0.694 -7.119 1.705 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.537</radius><length>3.410</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.537</radius><length>3.410</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g023">
+      <static>true</static>
+      <pose>-4.510 0.106 1.708 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.405</radius><length>3.416</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.405</radius><length>3.416</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g024">
+      <static>true</static>
+      <pose>2.527 -4.702 1.560 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.524</radius><length>3.120</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.524</radius><length>3.120</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g025">
+      <static>true</static>
+      <pose>4.564 -5.191 1.613 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.370</radius><length>3.227</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.370</radius><length>3.227</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g026">
+      <static>true</static>
+      <pose>-3.643 -9.565 1.389 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.262</radius><length>2.778</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.262</radius><length>2.778</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g027">
+      <static>true</static>
+      <pose>3.043 6.138 1.402 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.243</radius><length>2.805</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.243</radius><length>2.805</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g028">
+      <static>true</static>
+      <pose>-11.133 -10.670 1.290 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.330</radius><length>2.579</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.330</radius><length>2.579</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g029">
+      <static>true</static>
+      <pose>-7.942 -10.455 1.312 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.412</radius><length>2.625</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.412</radius><length>2.625</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g030">
+      <static>true</static>
+      <pose>10.669 9.605 1.466 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.400</radius><length>2.931</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.400</radius><length>2.931</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g031">
+      <static>true</static>
+      <pose>-11.628 6.394 1.710 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.398</radius><length>3.421</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.398</radius><length>3.421</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g032">
+      <static>true</static>
+      <pose>-10.872 -4.323 1.347 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.253</radius><length>2.693</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.253</radius><length>2.693</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g033">
+      <static>true</static>
+      <pose>-3.151 10.172 1.538 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.397</radius><length>3.077</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.397</radius><length>3.077</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g034">
+      <static>true</static>
+      <pose>10.163 7.665 1.622 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.397</radius><length>3.244</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.397</radius><length>3.244</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g035">
+      <static>true</static>
+      <pose>-4.718 -5.049 1.502 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.395</radius><length>3.004</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.395</radius><length>3.004</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g036">
+      <static>true</static>
+      <pose>6.784 9.106 1.549 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.395</radius><length>3.099</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.395</radius><length>3.099</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g037">
+      <static>true</static>
+      <pose>-10.554 -8.946 1.381 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.288</radius><length>2.762</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.288</radius><length>2.762</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g038">
+      <static>true</static>
+      <pose>9.651 5.825 1.477 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.225</radius><length>2.954</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.225</radius><length>2.954</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g039">
+      <static>true</static>
+      <pose>-12.016 3.929 1.342 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.393</radius><length>2.684</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.393</radius><length>2.684</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g040">
+      <static>true</static>
+      <pose>-2.873 -3.737 1.529 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.393</radius><length>3.058</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.393</radius><length>3.058</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g041">
+      <static>true</static>
+      <pose>2.977 10.135 1.464 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.224</radius><length>2.928</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.224</radius><length>2.928</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g042">
+      <static>true</static>
+      <pose>-11.119 9.926 1.406 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.392</radius><length>2.811</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.392</radius><length>2.811</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g043">
+      <static>true</static>
+      <pose>-7.353 1.994 1.672 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.392</radius><length>3.344</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.392</radius><length>3.344</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g044">
+      <static>true</static>
+      <pose>-4.494 -7.112 1.617 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.391</radius><length>3.233</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.391</radius><length>3.233</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g045">
+      <static>true</static>
+      <pose>-5.263 8.602 1.408 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.299</radius><length>2.816</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.299</radius><length>2.816</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g046">
+      <static>true</static>
+      <pose>-6.183 4.856 1.698 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.385</radius><length>3.396</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.385</radius><length>3.396</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g047">
+      <static>true</static>
+      <pose>-12.681 -0.543 1.638 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.319</radius><length>3.277</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.319</radius><length>3.277</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g048">
+      <static>true</static>
+      <pose>-12.760 -5.948 1.413 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.240</radius><length>2.827</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.240</radius><length>2.827</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g049">
+      <static>true</static>
+      <pose>-7.259 0.076 1.286 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.328</radius><length>2.572</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.328</radius><length>2.572</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g050">
+      <static>true</static>
+      <pose>-11.278 -7.369 1.355 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.247</radius><length>2.709</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.247</radius><length>2.709</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g051">
+      <static>true</static>
+      <pose>8.539 8.468 1.606 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.215</radius><length>3.212</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.215</radius><length>3.212</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g052">
+      <static>true</static>
+      <pose>-12.519 -9.250 1.557 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.377</radius><length>3.114</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.377</radius><length>3.114</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g053">
+      <static>true</static>
+      <pose>-10.067 3.375 1.548 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.375</radius><length>3.095</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.375</radius><length>3.095</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g054">
+      <static>true</static>
+      <pose>-8.809 10.333 1.656 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.373</radius><length>3.312</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.373</radius><length>3.312</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g055">
+      <static>true</static>
+      <pose>12.332 8.442 1.634 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.373</radius><length>3.267</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.373</radius><length>3.267</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g056">
+      <static>true</static>
+      <pose>1.159 -10.206 1.337 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.337</radius><length>2.674</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.337</radius><length>2.674</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g057">
+      <static>true</static>
+      <pose>-8.262 3.582 1.721 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.238</radius><length>3.442</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.238</radius><length>3.442</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g058">
+      <static>true</static>
+      <pose>-11.459 -2.449 1.447 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.356</radius><length>2.894</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.356</radius><length>2.894</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g059">
+      <static>true</static>
+      <pose>4.678 10.198 1.427 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.277</radius><length>2.854</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.277</radius><length>2.854</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g060">
+      <static>true</static>
+      <pose>12.799 -10.315 1.377 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.201</radius><length>2.754</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.201</radius><length>2.754</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g061">
+      <static>true</static>
+      <pose>-6.631 7.342 1.658 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.317</radius><length>3.317</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.317</radius><length>3.317</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g062">
+      <static>true</static>
+      <pose>-8.272 -8.251 1.713 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.348</radius><length>3.426</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.348</radius><length>3.426</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g063">
+      <static>true</static>
+      <pose>-2.619 -5.941 1.441 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.345</radius><length>2.883</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.345</radius><length>2.883</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g064">
+      <static>true</static>
+      <pose>-9.753 5.368 1.700 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.263</radius><length>3.401</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.263</radius><length>3.401</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g065">
+      <static>true</static>
+      <pose>3.085 -10.779 1.368 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.221</radius><length>2.737</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.221</radius><length>2.737</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g066">
+      <static>true</static>
+      <pose>4.929 -10.144 1.543 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.333</radius><length>3.087</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.333</radius><length>3.087</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g067">
+      <static>true</static>
+      <pose>12.562 6.506 1.352 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.329</radius><length>2.704</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.329</radius><length>2.704</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g068">
+      <static>true</static>
+      <pose>8.565 10.704 1.322 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.296</radius><length>2.644</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.296</radius><length>2.644</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g069">
+      <static>true</static>
+      <pose>5.221 5.991 1.553 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.308</radius><length>3.107</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.308</radius><length>3.107</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g070">
+      <static>true</static>
+      <pose>10.367 -10.598 1.586 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.292</radius><length>3.171</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.292</radius><length>3.171</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g071">
+      <static>true</static>
+      <pose>2.306 -6.879 1.259 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.289</radius><length>2.518</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.289</radius><length>2.518</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="pillar_g072">
+      <static>true</static>
+      <pose>6.273 -6.825 1.497 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.240</radius><length>2.994</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.240</radius><length>2.994</length></cylinder></geometry>
+          <material><script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ==================== OBSTACLES:END ==================== -->
+  </world>
+</sdf>

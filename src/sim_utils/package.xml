@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>sim_utils</name>
+  <version>0.1.0</version>
+  <description>
+    Multi-drone Gazebo/PX4 SITL formation-flight glue for the merged
+    FAST-LIO + Swarm-Formation(ego-planner) stack.
+
+    只放"多机编队"这条链路的 launch / 小工具, 不改动 Swarm-Formation 与
+    ego-planner-swarm 本身的包, 因此对已有单机仿真没有任何影响。
+  </description>
+  <maintainer email="safina@example.com">safina</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <!-- python 小工具: VIO(FAST-LIO) odom/pointcloud 的坐标系平移 -->
+  <exec_depend>rospy</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+
+  <!-- launch 里 include / 启动的包 -->
+  <exec_depend>fast_lio</exec_depend>
+  <exec_depend>ego_planner</exec_depend>
+  <exec_depend>swarm_bridge</exec_depend>
+  <exec_depend>to_mavros</exec_depend>
+  <exec_depend>odom_visualization</exec_depend>
+  <exec_depend>topic_tools</exec_depend>
+  <exec_depend>mavros</exec_depend>
+  <exec_depend>px4</exec_depend>
+  <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>rviz</exec_depend>
+</package>

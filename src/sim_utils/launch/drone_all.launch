@@ -1,0 +1,307 @@
+<launch>
+  <!-- ==========================================================================
+       多机编队: 单架无人机的**完整**链路 (由 formation.launch include)
+
+         PX4 SITL (带 LiDAR/IMU 的 iris 模型)
+           -> FAST-LIO (每机独立, 输出 /drone_<id>/Odometry, /drone_<id>/cloud_registered)
+           -> vision2mavros (FAST-LIO -> /drone_<id>/mavros/vision_pose/pose)
+                             ★ PX4 侧机型默认已是"纯 SLAM 定位"(EKF2_GPS_CTRL=0),
+                                EKF2 就靠这一路定位, 少了他无法解锁
+           -> vio_offset (把结果从 camera_init 平移到公共 world 系)
+           -> Swarm-Formation(ego_planner) + traj_server
+           -> poscmd2mavros -> mavros(/drone_<id>) -> PX4
+         + swarm_bridge (机间 UDP 广播, 交换各自的轨迹)
+
+       话题命名沿用 Swarm-Formation 的原生约定 (它源码里写死了
+       /drone_<id>_visual_slam/odom 与 /drone_<id>_planning/*), 不要改.
+       ========================================================================== -->
+
+  <arg name="ID"/>
+  <arg name="vehicle"      default="iris"/>
+  <!-- 起飞点: 沿 y 轴一字排开; 只在下面算一次, Gambo spawn 与坐标平移共用 -->
+  <arg name="start_x"      default="0.0"/>
+  <arg name="start_y"      default="0.0"/>
+  <arg name="spacing"      default="2.0"/>
+  <!-- 传感器在机体上的安装位置, 必须与 gen_drone_sdf.py 里的 <pose> 一致 -->
+  <arg name="mount_x"      default="0.05"/>
+  <arg name="mount_z"      default="0.20"/>
+
+  <arg name="odom_topic"   default="visual_slam/odom"/>
+  <arg name="cloud_topic"  default="pcl_render_node/cloud"/>
+
+  <arg name="map_size_x"      default="40.0"/>
+  <arg name="map_size_y"      default="30.0"/>
+  <!-- map_size_z 是 A*(dyn_a_star) 的**格子池高度**: 无人机或目标点的 z 一旦
+       超过它, A* 的 index 就会越界, 报 "Ran out of pool" -> 规划直接失败.
+       取 5.0 m 留足余量(fly z 一般 0.5~1.5 m, 起飞/爬升瞬间也不会越界). -->
+  <arg name="map_size_z"      default="5.0"/>
+  <!-- max_vel / planning_horizon: 见 formation.launch 头部的 L1 第三轮说明。
+       · max_vel: 多机时由 formation.launch 覆盖为 0.8 (更保守), 这里的 1.0 是
+         单机/未指定时的默认值 (原 1.5 会让 v² 型的跟踪滞后更大)。
+       · planning_horizon: 必须 <= 感知半径。grid_map/depth_filter_maxdist = 5.0,
+         max_ray_length = 4.5; 7.5 m 的视界会让 EGO 把"未观测区"当自由空间先画好
+         轨迹, 障碍进图时只剩 <1 s 反应 (实测 too close 的相对时间中位数 0.617)。 -->
+  <arg name="max_vel"         default="1.0"/>
+  <arg name="max_acc"         default="6.0"/>
+  <arg name="planning_horizon" default="5.0"/>
+  <!-- 障碍物硬膨胀, 透传给 advanced_param.xml 的 grid_map/obstacles_inflation。
+       0.35 -> inf_step = ceil(0.35/0.1) = 4 体素, 地图硬边界 0.412 m > 机体含桨尖
+       半径 0.348 m (0.3 时只有 0.316 m, 允许规划器把机体插进柱子 3.2 cm)。 -->
+  <arg name="obstacles_inflation" default="0.35"/>
+  <!-- 近距保护半径, 透传给 advanced_param.xml 的 grid_map/min_ray_length。
+       机体周围这个半径内的格子不再被 raycast 的 miss 清障, 防止:
+         贴近障碍 -> LiDAR 0.3 m 物理盲区使柱面点消失 -> pcl_render 的 depth 图
+         该像素 = 0 -> grid_map 把它当"最远"(4.6 m) -> 这些射线按 -0.62/帧 把柱子
+         的占据格削掉(**2 帧**就跌破 logit(p_occ=0.80) 的障碍门限, 0.2 s)
+         -> A*/优化器认为能穿过 -> 擦碰。
+       做 A/B 对比(需先重编译 plan_env, 见 grid_map.cpp 的近距保护注释):
+         roslaunch sim_utils formation.launch min_ray_length:=0      # 旧行为 -->
+  <arg name="min_ray_length" default="0.5"/>
+  <!-- virtual_ceil_height (第四轮新增): 虚拟天花板高度 (m), 透传给
+       advanced_param.xml(它是高级参数里**唯一**能限制飞行海拔的硬约束)。
+       4.5 -> 2.0 的原因: world 柱体真值高 2.5~3.46 m, 但受"LiDAR 垂直 FOV
+       ±15° + max_ray_length 4.5 m 之外只清障不记障"的双重限制, 地图里柱子
+       最高只建到 z_机+1.41 m -> 柱顶上方是**假空白**, A* 于是从上方绕过去
+       撞柱身。把天花板压到 2.0 后飞行带 [0.3,1.6] 全在地图可靠建高区内。
+       需要真 3D 任务时: roslaunch sim_utils formation.launch virtual_ceil_height:=4.5 -->
+  <arg name="virtual_ceil_height" default="2.0"/>
+
+  <arg name="broadcast_ip"    default="127.0.0.255"/>
+  <arg name="takeoff_height"  default="0.5"/>
+  <!-- FAST-LIO 晚一点起, 等 Gazebo/IMU 稳定 (0 = 立刻起) -->
+  <arg name="lio_start_delay" default="30"/>
+  <!-- poscmd2mavros 要更晚起. 它一上来就会用 PX4 的 local_position(EKF) 做
+       "解锁 + OFFBOARD + 起飞到 cur_pos+takeoff_height"; 如果它和 PX4/Gazebo
+       同时启动, 拿到的 EKF 位置还没收敛(实测会把起飞目标算到 3~4 m 高),
+       于是飞机自己爬上去, z 还超出 map_size_z -> A* 报 "Ran out of pool".
+       单机脚本 run_sim.sh 也是先起 PX4(30s)+FAST-LIO(20s) 再起它的. -->
+  <arg name="poscmd_start_delay" default="55"/>
+  <!-- vision2mavros: FAST-LIO -> PX4 外部视觉。
+       必须在 FAST-LIO 真正开始输出 /drone_<id>/Odometry 之后再起, 而且它还要
+       再攒 100 帧(30Hz≈3.4s)算零点; poscmd2mavros(55s) 去解锁时 EKF2 必须
+       已经收到 vision_pose, 否则解锁报 "no position estimate"。 -->
+  <arg name="vision_start_delay" default="42"/>
+
+  <arg name="pos_x" value="$(eval float(arg('start_x')))"/>
+  <arg name="pos_y" value="$(eval float(arg('start_y')) + float(arg('spacing')) * float(arg('ID')))"/>
+
+  <!-- PX4 SITL 实例号 ID -> 每机一套独立的端口/系统号.
+       注意: roslaunch 的 $(eval ...) 只有在"整个字符串就是一个 eval"时才走
+       python 求值; 一旦 eval 出现在字符串中间(比如拼 URL), 就会退回严格的
+       括号解析器, 里面**不允许出现嵌套括号**. 所以这里先把数字算好,
+       再用 $(arg ...) 拼字符串. -->
+  <arg name="mavlink_id"      value="$(eval 1 + int(arg('ID')))"/>
+  <arg name="mav_local_port"  value="$(eval 14540 + int(arg('ID')))"/>
+  <arg name="mav_remote_port" value="$(eval 14580 + int(arg('ID')))"/>
+  <arg name="fcu_url" value="udp://:$(arg mav_local_port)@localhost:$(arg mav_remote_port)"/>
+
+  <!-- ================================== 1) PX4 SITL + Gazebo 模型 ==================================
+       模型 SDF 由 sim_assets/scripts/gen_drone_sdf.py 预先生成
+       (run_formation.sh 会调; 里面有**每机不同**的 mavlink 端口和 LiDAR 话题名).
+       -i <ID>  : PX4 实例号 -> mavlink 端口 14580+ID / 14540+ID / 14560+ID
+       -w       : 每个实例独立的参数存储, 否则多机的 PX4 参数会互相覆盖
+       -d       : 不要交互式 pxh shell (后台跑必须)
+       ================================== -->
+  <env name="PX4_SIM_MODEL" value="gazebo-classic_$(arg vehicle)"/>
+
+  <node name="sitl_$(arg ID)" pkg="px4" type="px4" output="screen"
+        args="$(find px4)/build/px4_sitl_default/etc -s etc/init.d-posix/rcS -i $(arg ID) -w sitl_$(arg vehicle)_$(arg ID) -d"/>
+
+  <node name="iris_lidar_$(arg ID)_spawn" pkg="gazebo_ros" type="spawn_model" output="screen"
+        args="-sdf -file $(env SIM_ASSETS_DIR)/models/iris_lidar_multi/iris_lidar_$(arg ID).sdf -model iris_lidar_$(arg ID) -x $(arg pos_x) -y $(arg pos_y) -z 0.0 -R 0 -P 0 -Y 0"/>
+
+  <!-- ================================== 2) mavros (名字空间 /drone_<id>) ================================== -->
+  <group ns="drone_$(arg ID)">
+    <include file="$(find mavros)/launch/px4.launch">
+      <arg name="fcu_url"  value="$(arg fcu_url)"/>
+      <arg name="gcs_url"  value=""/>
+      <arg name="tgt_system" value="$(arg mavlink_id)"/>
+      <arg name="tgt_component" value="1"/>
+      <arg name="respawn_mavros" value="false"/>
+    </include>
+  </group>
+
+  <!-- ================================== 3) FAST-LIO ==================================
+       注意: FAST-LIO 的 readParameters() 用的是**全局** NodeHandle, 所以
+       <rosparam>/<param> 必须写在 launch 级(而不是 <node> 里), 否则它读不到.
+       (mapping_sim_gazebo.launch 也是这么写的.)
+       每机的差别只有话题名, 用 <remap> 就够了, 不用改 FAST-LIO 源码.
+       ================================== -->
+  <rosparam command="load" file="$(find fast_lio)/config/sim_gazebo.yaml"/>
+  <param name="feature_extract_enable"  type="bool"   value="0"/>
+  <param name="point_filter_num"        type="int"    value="3"/>
+  <param name="max_iteration"           type="int"    value="4"/>
+  <param name="filter_size_surf"        type="double" value="0.3"/>
+  <param name="filter_size_map"         type="double" value="0.3"/>
+  <param name="cube_side_length"        type="double" value="1000"/>
+  <param name="runtime_pos_log_enable"  type="bool"   value="0"/>
+
+  <node pkg="fast_lio" type="fastlio_mapping" name="fastlio_drone_$(arg ID)" output="screen"
+        launch-prefix="$(find sim_utils)/scripts/delayed_start.sh $(arg lio_start_delay)">
+    <!-- 输入: 共享 yaml 里写死的是 /drone_0/*, 这里按本机 ID 重新指 -->
+    <remap from="/drone_0/points" to="/drone_$(arg ID)/points"/>
+    <remap from="/drone_0/imu"    to="/drone_$(arg ID)/imu"/>
+    <!-- 输出: FAST-LIO 源码里写死的全局名字 -> 每机独立 -->
+    <remap from="/Odometry"              to="/drone_$(arg ID)/Odometry"/>
+    <remap from="/cloud_registered"      to="/drone_$(arg ID)/cloud_registered"/>
+    <remap from="/cloud_registered_body" to="/drone_$(arg ID)/cloud_registered_body"/>
+    <remap from="/cloud_effected"        to="/drone_$(arg ID)/cloud_effected"/>
+    <remap from="/Laser_map"             to="/drone_$(arg ID)/Laser_map"/>
+    <remap from="/path"                  to="/drone_$(arg ID)/path"/>
+  </node>
+
+  <!-- ================================== 4) FAST-LIO 局部系 -> 公共 world 系 ==================================
+       每架 FAST-LIO 的原点都是它自己的起飞点, 不共享坐标系; 加一个固定平移
+       (pos_x + mount_x, pos_y, mount_z) 之后就都回到 world 系了.
+       平移量 = 起飞点在 world 里的位置 + 传感器安装偏移.
+       ================================== -->
+  <node pkg="sim_utils" type="vio_offset.py" name="vio_offset_drone_$(arg ID)" output="screen"
+        launch-prefix="/usr/bin/python3">
+    <param name="odom_in"   value="/drone_$(arg ID)/Odometry"/>
+    <param name="cloud_in"  value="/drone_$(arg ID)/cloud_registered"/>
+    <param name="odom_out"  value="/drone_$(arg ID)_$(arg odom_topic)"/>
+    <param name="cloud_out" value="/drone_$(arg ID)_$(arg cloud_topic)"/>
+    <param name="frame_id"  value="world"/>
+    <param name="offset_x"  value="$(eval float(arg('pos_x')) + float(arg('mount_x')))"/>
+    <param name="offset_y"  value="$(arg pos_y)"/>
+    <param name="offset_z"  value="$(arg mount_z)"/>
+  </node>
+
+  <!-- ================================== 4.5) vision2mavros: FAST-LIO -> PX4 外部视觉 ==================================
+       PX4 侧机型 10015_gazebo-classic_iris 已被改成"纯 SLAM 定位"
+       (EKF2_GPS_CTRL=0 / EKF2_EV_CTRL=7 / EKF2_HGT_REF=3),
+       EKF2 完全没有 GPS 可用, 只能靠 /drone_<id>/mavros/vision_pose/pose 定位,
+       所以这一路是**必须**的: 少了它 EKF2 无水平位置源 -> 无法解锁。
+         · 输入用 FAST-LIO 原生的 /drone_<id>/Odometry (camera_init 系);
+           vision2mavros 自己会减掉前 100 帧的平均位姿 -> 输出以"起始点(起飞点)"
+           为原点, 正好和 poscmd2mavros 用的 origin_x/y=(pos_x,pos_y) 对得上.
+         · 输出 publisher 在源码里写死成绝对名字 /mavros/vision_pose/pose,
+           多机必须 remap 进本机命名空间, 否则 N 架会互相抢同一个话题.
+         · body_lidar_* = LiDAR/IMU 在机体上的安装偏移(与 gen_drone_sdf.py 的
+           <pose> 一致); vision2mavros 用它把"雷达位姿"换成"机体位姿":
+               p_body = p_lidar - R * t_body_lidar
+       ================================== -->
+  <node pkg="to_mavros" type="vision2mavros" name="vision2mavros_drone_$(arg ID)" output="screen"
+        launch-prefix="$(find sim_utils)/scripts/delayed_start.sh $(arg vision_start_delay)">
+    <remap from="/mavros/vision_pose/pose" to="/drone_$(arg ID)/mavros/vision_pose/pose"/>
+    <param name="vision_pose_topic" value="/drone_$(arg ID)/Odometry"/>
+    <param name="publish_rate"      value="30.0"/>
+    <param name="body_lidar_x"      value="$(arg mount_x)"/>
+    <param name="body_lidar_y"      value="0.0"/>
+    <param name="body_lidar_z"      value="$(arg mount_z)"/>
+  </node>
+
+  <!-- ================================== 5) Swarm-Formation (ego_planner) ==================================
+       flight_type=3 = SWARM_MANUAL_TARGET: 所有无人机的 goal 都由 RViz 里
+       一次 "2D Nav Goal" (/move_base_simple/goal) 触发, 每架按自己的
+       relative_pos_<drone_id> (normal_hexagon.yaml) 摆到编队阵位上.
+       odom/cloud 指向第 4 步平移好的公共 world 系话题.
+       ================================== -->
+  <include file="$(find ego_planner)/launch/advanced_param.xml">
+    <arg name="drone_id"       value="$(arg ID)"/>
+    <arg name="map_size_x_"    value="$(arg map_size_x)"/>
+    <arg name="map_size_y_"    value="$(arg map_size_y)"/>
+    <arg name="map_size_z_"    value="$(arg map_size_z)"/>
+    <arg name="odometry_topic" value="$(arg odom_topic)"/>
+    <arg name="cloud_topic"    value="$(arg cloud_topic)"/>
+    <arg name="camera_pose_topic" value="pcl_render_node/camera_pose"/>
+    <arg name="depth_topic"       value="pcl_render_node/depth"/>
+    <arg name="cx" value="321.04638671875"/>
+    <arg name="cy" value="243.44969177246094"/>
+    <arg name="fx" value="387.229248046875"/>
+    <arg name="fy" value="387.229248046875"/>
+    <arg name="max_vel"          value="$(arg max_vel)"/>
+    <arg name="max_acc"          value="$(arg max_acc)"/>
+    <arg name="planning_horizon" value="$(arg planning_horizon)"/>
+    <arg name="obstacles_inflation" value="$(arg obstacles_inflation)"/>
+    <arg name="min_ray_length"       value="$(arg min_ray_length)"/>
+    <arg name="virtual_ceil_height"  value="$(arg virtual_ceil_height)"/>
+    <arg name="use_distinctive_trajs" value="false"/>
+    <arg name="flight_type"      value="3"/>
+    <arg name="obj_num_set"      value="0"/>
+    <!-- flight_type=3 时下面的航点参数只是占位(但 advanced_param.xml 里是必填 arg) -->
+    <arg name="point_num" value="1"/>
+    <arg name="point0_x" value="0.0"/><arg name="point0_y" value="0.0"/><arg name="point0_z" value="0.5"/>
+    <arg name="point1_x" value="0.0"/><arg name="point1_y" value="0.0"/><arg name="point1_z" value="0.0"/>
+    <arg name="point2_x" value="0.0"/><arg name="point2_y" value="0.0"/><arg name="point2_z" value="0.0"/>
+    <arg name="point3_x" value="0.0"/><arg name="point3_y" value="0.0"/><arg name="point3_z" value="0.0"/>
+    <arg name="goal_check_strict" value="false"/>
+    <arg name="goal_check_los"    value="true"/>
+  </include>
+
+  <!-- ================================== 6) traj_server ==================================
+       把 poly_traj (traj_utils/PolyTraj) 采样成 quadrotor_msgs/PositionCommand
+       输出到 /drone_<id>_planning/pos_cmd (Swarm-Formation 的 traj_server 订阅
+       的是 ~planning/trajectory, 不是 ego-planner-swarm 的 ~planning/bspline).
+       ================================== -->
+  <node pkg="ego_planner" name="drone_$(arg ID)_traj_server" type="traj_server" output="screen">
+    <remap from="/position_cmd" to="/drone_$(arg ID)_planning/pos_cmd"/>
+    <remap from="~planning/trajectory" to="/drone_$(arg ID)_planning/trajectory"/>
+    <remap from="~planning/start"      to="/drone_$(arg ID)_planning/start"/>
+    <remap from="~planning/finish"     to="/drone_$(arg ID)_planning/finish"/>
+    <param name="traj_server/time_forward" value="1.0" type="double"/>
+  </node>
+
+  <!-- ================================== 7) RViz 里的机体/轨迹显示 ==================================
+       odom_visualization 的话题是 private(~), 所以会落在 /drone_<id>_odom_visualization/*
+       每机一个颜色, 便于在 RViz 里区分.
+       ================================== -->
+  <node pkg="odom_visualization" name="drone_$(arg ID)_odom_visualization"
+        type="odom_visualization" output="log">
+    <remap from="~odom" to="/drone_$(arg ID)_$(arg odom_topic)"/>
+    <param name="frame_id"    value="world"/>
+    <param name="drone_id"    value="$(arg ID)"/>
+    <param name="tf45"        value="false"/>
+    <param name="robot_scale" value="1.5"/>
+    <param name="color/a"     value="1.0"/>
+    <param name="color/r"     value="$(eval (1.0, 0.0, 0.2, 1.0, 1.0)[int(arg('ID')) % 5])"/>
+    <param name="color/g"     value="$(eval (0.0, 1.0, 0.4, 0.8, 0.0)[int(arg('ID')) % 5])"/>
+    <param name="color/b"     value="$(eval (0.0, 0.0, 1.0, 0.0, 1.0)[int(arg('ID')) % 5])"/>
+  </node>
+
+  <!-- ================================== 8) poscmd2mavros: pos_cmd -> mavros setpoint ==================================
+       mavros 在 /drone_<id> 名字空间里, 所以:
+         · state/local_position 用参数直接指到 /drone_<id>/mavros/...
+         · setpoint/arming/set_mode 在源码里是写死的全局名字, 用 remap 改掉.
+       auto_land_on_finish=false: 到达编队阵位后原地悬停, 方便在 RViz 里
+       连续点下一个目标点.
+       ================================== -->
+  <node pkg="to_mavros" type="poscmd2mavros" name="poscmd2mavros" output="screen"
+        ns="drone_$(arg ID)"
+        launch-prefix="$(find sim_utils)/scripts/delayed_start.sh $(arg poscmd_start_delay)">
+    <remap from="/mavros/setpoint_raw/local" to="/drone_$(arg ID)/mavros/setpoint_raw/local"/>
+    <remap from="/mavros/cmd/arming"         to="/drone_$(arg ID)/mavros/cmd/arming"/>
+    <remap from="/mavros/set_mode"           to="/drone_$(arg ID)/mavros/set_mode"/>
+    <param name="poscmd_topic"    value="/drone_$(arg ID)_planning/pos_cmd"/>
+    <param name="state_topic"     value="/drone_$(arg ID)/mavros/state"/>
+    <param name="local_pos_topic" value="/drone_$(arg ID)/mavros/local_position/pose"/>
+    <!-- 本机起飞点在公共 world 系里的位置: pos_cmd(world 绝对坐标) 换算到
+         mavros 本地 ENU 系要减掉它. 见 poscmd2mavros.cpp 的 TRACK 分支注释. -->
+    <param name="origin_x" value="$(arg pos_x)"/>
+    <param name="origin_y" value="$(arg pos_y)"/>
+    <param name="origin_z" value="0.0"/>
+    <param name="control_rate"    value="50.0"/>
+    <param name="control_mode"    value="0"/>
+    <param name="auto_arm"        value="true"/>
+    <param name="takeoff_enable"  value="true"/>
+    <param name="takeoff_height"  value="$(arg takeoff_height)"/>
+    <param name="takeoff_tol"     value="0.25"/>
+    <param name="auto_land_on_finish" value="false"/>
+    <param name="max_vel"         value="5.0"/>
+  </node>
+
+  <!-- ================================== 9) swarm_bridge: 机间轨迹交换 ==================================
+       每个 bridge 把本机的 ~my_odom 广播出去, 并做
+         /broadcast_traj_from_planner  ==UDP==>  /broadcast_traj_to_planner
+       的单机内中转; 于是所有无人机的规划器都能收到别人的 poly_traj,
+       用来做机间避让/编队协同.
+       单机跑 N 个 bridge: 都绑 8081 且带 SO_REUSEPORT, 所以每个都能收到所有
+       广播(包括自己的), planner 的回调里用 drone_id 过滤掉自己, 安全.
+       ================================== -->
+  <node pkg="swarm_bridge" name="drone_$(arg ID)_bridge_node" type="bridge_node" output="screen">
+    <remap from="~my_odom" to="/drone_$(arg ID)_$(arg odom_topic)"/>
+    <param name="broadcast_ip"  value="$(arg broadcast_ip)" type="string"/>
+    <param name="drone_id"      value="$(arg ID)"/>
+    <param name="odom_max_freq" value="70"/>
+  </node>
+</launch>

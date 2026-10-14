@@ -1,0 +1,294 @@
+<launch>
+  <arg name="map_size_x_"/>
+  <arg name="map_size_y_"/>
+  <arg name="map_size_z_"/>
+
+  <arg name="odometry_topic"/>
+  <arg name="camera_pose_topic"/>
+  <arg name="depth_topic"/>
+  <arg name="cloud_topic"/>
+
+  <arg name="cx"/>
+  <arg name="cy"/>
+  <arg name="fx"/>
+  <arg name="fy"/>
+
+  <arg name="max_vel"/>
+  <arg name="max_acc"/>
+  <arg name="planning_horizon"/>
+
+  <arg name="point_num"/>
+  <arg name="point0_x"/>
+  <arg name="point0_y"/>
+  <arg name="point0_z"/>
+  <arg name="point1_x"/>
+  <arg name="point1_y"/>
+  <arg name="point1_z"/>
+  <arg name="point2_x"/>
+  <arg name="point2_y"/>
+  <arg name="point2_z"/>
+  <arg name="point3_x"/>
+  <arg name="point3_y"/>
+  <arg name="point3_z"/>
+  <!-- point4_* : ego-planner-swarm 的 sim_gazebo.launch 会传入这几个 arg,
+       Swarm-Formation 的 fsm 只用到 waypoint0..3, 这里给默认值仅为了
+       include 时参数能正常解析(不传则用默认)。 -->
+  <arg name="point4_x" default="0.0"/>
+  <arg name="point4_y" default="0.0"/>
+  <arg name="point4_z" default="0.0"/>
+
+  <arg name="flight_type"/>
+  <arg name="use_distinctive_trajs"/>
+  <arg name="obj_num_set"/>
+  <arg name="drone_id"/>
+
+  <!-- 目标点安全检查参数: 来自 ego-planner-swarm 的定制(sim_gazebo.launch 会传入)。
+       Swarm-Formation 的 ego_replan_fsm 不读取这两个参数, 这里给默认值以保证
+       sim_gazebo.launch / run_in_sim.launch 都能正常解析。 -->
+  <arg name="goal_check_strict" default="false"/>
+  <arg name="goal_check_los" default="true"/>
+
+  <!-- L1 安全/及时性调参 (2026-10-13, 第二轮; 单机实测"撞障碍物"问题)
+       · thresh_replan_time: 重规划周期 1.0 -> 0.4 -> 0.3 s.
+         FSM 里 `t_cur > replan_thresh_` 是唯一的定时重规划判据 (ego_replan_fsm.cpp
+         ~281 行); 1.0 s @1.5 m/s 意味着障碍"闪入"局部图 (local_update_range=5.5 m)
+         后最多盲飞 1.5 m 才换轨迹. 0.4 s 压到 ~0.6 m, 0.3 s 进一步压到 ~0.45 m.
+       · obstacles_inflation: 硬膨胀 0.2 -> 0.3 -> 0.35 m。
+         inf_step = ceil(0.35/0.1) = 4 -> 实际硬边界 0.4 m, 第一次 > 机体含桨尖
+         的水平外伸 0.348 m。第一轮 0.3 m 实测仍擦碰: 机体中心贴到膨胀面
+         0.009 m (距真实柱面 0.18 m) 才急停。
+       · 第二轮实测 (2026-10-13, 组合 0.35/0.7/0.3/0.5, max_vel 0.8):
+         场景A 目标在柱后(起点到目标的直线必然穿过柱子):
+             最小中心距柱心 1.113 m = 距柱面 0.805 m, 机体余量 +0.457 m,
+             检测到碰撞后 "Plan success" 成功重规划绕行, 终点误差 6 cm。
+         场景B 目标就在柱心(极端, 必然触发目标点挪动):
+             最小中心距柱心 1.519 m, 余量 +0.863 m, 未触碰;
+             但仍出现 "Emergency stop! time=0.0" 事件 -> L2 待改: 碰撞预看
+             时间只到 replan_thresh_(0.3 s), 没有按速度折算制动距离,
+             且 goal-check 挪动后的目标点只保证"在膨胀体外"不保证机体半径余量。
+       多机若要恢复原值: roslaunch ... thresh_replan_time:=1.0 obstacles_inflation:=0.2 -->
+       <!--人为修改到0.1-->
+  <arg name="thresh_replan_time" default="0.1"/>
+  <!-- L1 第三轮 (2026-10-13, 几何复现): 0.3 -> 0.35, 由 formation.launch 透传, 可直接覆盖。
+       依据 (用 formation.world 真值几何 + 本工程的 resolution/膨胀规则离线复现,
+             脚本 /tmp/gap_check.py + /tmp/simulate_astar.py):
+         · 77 根柱体, 2926 对里最窄"柱面间隙" = 1.199 m (g014 <-> g045);
+         · inflation=0.3 -> inf_step=ceil(0.3/0.1)=3, 地图"可通行格"中离柱面最近的
+           只有 0.316 m, 小于机体含桨尖半径 0.348 m -> **规划器允许的几何位置本身
+           已与柱体重叠 3.2 cm** (实测 34 次 too close 的几何来源);
+         · inflation=0.35 -> inf_step=4, 该边界升到 0.412 m (>0.348 m), 且 1.199 m
+           的窄缝仍全部可通行 (穿越测试可达性 100%, 自由空间 84%, 无一处被堵死)。
+       注意 inf_step = ceil(inflation/resolution): 0.45 与 0.5 同为 5 体素, 再大才会
+       真正开始吃窄缝。 -->
+  <arg name="obstacles_inflation" default="0.35"/>
+  <!-- min_ray_length: raycast 的**近距保护半径** (m), >= 机体含桨尖半径 0.348 m。
+       机体周围这个半径内的格子不再被 miss 射线清障 —— 保证"贴着障碍但按几何
+       还没撞"的合法姿态下, 障碍不会从地图上被擦掉。设 0 = 退回旧行为。 -->
+  <arg name="min_ray_length" default="0.5"/>
+  <!-- virtual_ceil_height (第四轮新增): **虚拟天花板高度** (m) —— 本工程唯一能
+       真正限制飞行海拔的硬约束, 也是把规划器从 3D 压成"准 2D 迷宫"的开关。
+       作用: clearAndInflateLocalMap() 会在这**一整层**写入膨胀障碍
+             (grid_map.cpp:690-692), A*(dyn_a_star 查 getInflateOccupancy) 与
+             ESDF 都能看见 -> 机体无法爬到这一层以上。
+       为什么必须压下来 (真值几何 + 感知几何复现, 见 diag/height_probe.py):
+         · world 柱体是真值 z 0 ~ 2.50..3.46 m 的**实心柱**
+           (gen_formation_world.py: LEN_RANGE=(2.5,3.5), 注释写明"都高于飞行
+           高度 -> 整个场地是二维迷宫");
+         · 但**地图里**柱子的最高点受感知双重硬限制:
+             1) LiDAR 垂直 FOV 仅 ±15° (16 线, gen_drone_sdf.py 的
+                vertical min/max_angle) -> 上限 = z_雷达 + d*tan15° = +0.268d;
+             2) max_ray_length = 4.5 m: 更远的点**只做清障、不记为障碍**
+                (grid_map.cpp:402-410 走 setCacheOccupancy(pt_w, 0)=miss),
+                所以有效观测半径就是 4.5 m;
+           => 地图柱高上限 ≈ (z_机 + 0.20) + 4.5*tan15° = **z_机 + 1.41 m**
+              (机体 z=0.5 -> 1.9 m; z=1.0 -> 2.4 m; 与 height_probe 实测一致)
+           => 柱顶 2.5~3.46 m 以上在地图里是"**假空白**" -> A* 有格子空位就会
+              选"从柱顶上方绕"的高路, B 样条跟随 -> 真实世界里撞在柱身上部。
+         · 把天花板压到 2.0 m 后: 机体可行高度带约 [0.3, 1.6] m (再减去
+           inflation 0.35/ESDF 余量) **完全落在地图可靠建高区 (≈z_机+1.41,
+           即 >=1.9 m) 以内** -> 柱子在该带内处处实心, 只剩"从两侧绕"的解,
+           正好还原场景的设计意图。
+       原值 4.5 m 高于柱顶 3.46 m 且等于 local_update_range_z, 形同虚设。
+       要做真正的 3D 穿越任务时才调高 (但需同时解决上面两条感知限制):
+           roslaunch sim_utils formation.launch virtual_ceil_height:=4.5
+       注意 grid_map.cpp:84 会用 map_size_z 夹取本值, 必须 < map_size_z - resolution。 -->
+  <arg name="virtual_ceil_height" default="2.0"/>
+  <!-- <arg name="formation_type"/>
+  <arg name="weight_obstacle"/>
+  <arg name="weight_swarm"/>
+  <arg name="weight_feasibility"/>
+  <arg name="weight_sqrvariance"/>
+  <arg name="weight_time"/>
+  <arg name="weight_formation"/>
+  <arg name="obstacle_clearance"/>
+  <arg name="swarm_clearance"/>
+  <arg name="replan_trajectory_time"/> -->
+  
+  <!-- main node -->
+  <!-- <node pkg="ego_planner" name="ego_planner_node" type="ego_planner_node" output="screen" launch-prefix="valgrind"> -->
+  <node pkg="ego_planner" name="drone_$(arg drone_id)_ego_planner_node" type="ego_planner_node" output="screen">
+  
+    <remap from="~odom_world" to="/drone_$(arg drone_id)_$(arg odometry_topic)"/>
+    <remap from="~planning/trajectory" to = "/drone_$(arg drone_id)_planning/trajectory"/>
+    <remap from="~planning/start" to = "/drone_$(arg drone_id)_planning/start"/>
+    <remap from="~planning/finish" to = "/drone_$(arg drone_id)_planning/finish"/>
+    <remap from="~planning/data_display" to = "/drone_$(arg drone_id)_planning/data_display"/>
+    <remap from="~planning/broadcast_traj_send" to = "/broadcast_traj_from_planner"/>
+    <remap from="~planning/broadcast_traj_recv" to = "/broadcast_traj_to_planner"/>
+
+    <remap from="~grid_map/odom" to="/drone_$(arg drone_id)_$(arg odometry_topic)"/>
+    <remap from="~grid_map/cloud" to="/drone_$(arg drone_id)_$(arg cloud_topic)"/>
+    <!-- <remap from="~grid_map/cloud" to="/map_generator/global_cloud"/> -->
+    <remap from="~grid_map/pose"   to = "/drone_$(arg drone_id)_$(arg camera_pose_topic)"/> 
+    <remap from="~grid_map/depth" to = "/drone_$(arg drone_id)_$(arg depth_topic)"/>
+    
+   <rosparam file="$(find ego_planner)/config/normal_hexagon.yaml"/>
+
+    <!-- planning fsm -->
+    <param name="fsm/flight_type"             value="$(arg flight_type)" type="int"/>
+    <param name="fsm/thresh_replan_time"      value="$(arg thresh_replan_time)" type="double"/> <!-- L1: 1.0 -> 0.4 -> 0.3 s, 见文件头注释 -->
+    <!-- thresh_no_replan_meter: 距目标点这么近就不再重规划。原值 1.0 m 意味着
+         "最后 1 m 内既不重规划也不查碰撞", 实测机体正是贴到障碍膨胀边上才急停。
+         0.1 m 让最后一段也保持重规划(代价是末端多算几次, 单机无压力)。 -->
+    <param name="fsm/thresh_no_replan_meter"  value="0.1" type="double"/>
+    <param name="fsm/planning_horizon"        value="$(arg planning_horizon)" type="double"/> <!--always set to 1.5 times grater than sensing horizen-->
+    <param name="fsm/planning_horizen_time"   value="3" type="double"/>
+    <param name="fsm/emergency_time"          value="1.0" type="double"/>
+    <param name="fsm/realworld_experiment"    value="false"/>
+    <param name="fsm/fail_safe"               value="true"/>
+    <!-- <param name="fsm/replan_trajectory_time"  value="$(arg replan_trajectory_time)" type="double"/> -->
+
+    <param name="fsm/result_file" value="/home/zuzu/Documents/report/ego_swarm_1.txt"/>
+
+    <param name="fsm/waypoint_num"  value="$(arg point_num)" type="int"/>
+    <param name="fsm/waypoint0_x"   value="$(arg point0_x)" type="double"/>
+    <param name="fsm/waypoint0_y"   value="$(arg point0_y)" type="double"/>
+    <param name="fsm/waypoint0_z"   value="$(arg point0_z)" type="double"/>
+    <param name="fsm/waypoint1_x"   value="$(arg point1_x)" type="double"/>
+    <param name="fsm/waypoint1_y"   value="$(arg point1_y)" type="double"/>
+    <param name="fsm/waypoint1_z"   value="$(arg point1_z)" type="double"/>
+    <param name="fsm/waypoint2_x"   value="$(arg point2_x)" type="double"/>
+    <param name="fsm/waypoint2_y"   value="$(arg point2_y)" type="double"/>
+    <param name="fsm/waypoint2_z"   value="$(arg point2_z)" type="double"/>
+    <param name="fsm/waypoint3_x"   value="$(arg point3_x)" type="double"/>
+    <param name="fsm/waypoint3_y"   value="$(arg point3_y)" type="double"/>
+    <param name="fsm/waypoint3_z"   value="$(arg point3_z)" type="double"/>
+    
+    <param name="grid_map/resolution"             value="0.1" /> 
+    <param name="grid_map/map_size_x"             value="$(arg map_size_x_)" /> 
+    <param name="grid_map/map_size_y"             value="$(arg map_size_y_)" /> 
+    <param name="grid_map/map_size_z"             value="$(arg map_size_z_)" /> 
+    <param name="grid_map/local_update_range_x"   value="5.5" /> 
+    <param name="grid_map/local_update_range_y"   value="5.5" /> 
+    <param name="grid_map/local_update_range_z"   value="4.5" /> 
+    <!-- <param name="grid_map/local_update_range_x"   value="$(arg map_size_x_)" /> 
+    <param name="grid_map/local_update_range_y"   value="$(arg map_size_y_)" /> 
+    <param name="grid_map/local_update_range_z"   value="$(arg map_size_z_)" /> -->
+    <!-- obstacles_inflation: 障碍物**硬**膨胀 (occupancy_buffer_inflate_)。
+         红外 -> inf_step = ceil(inflation/resolution) = 1 体素 = ±0.1 m, 加上体素量化后,
+         A* / 硬碰撞检查 (getInflateOccupancy) 只能保证无人机中心离真实障碍面
+         ~0.15 m; 而本机"含桨尖"的水平外伸是 0.348 m (机身 0.47x0.47, 桨叶半径
+         0.128 装在 (±0.13, ±0.22)), 对角 0.383 m -> 0.15 m 的硬边界根本挡不住
+         桨尖, 所以"轻微擦碰"只能靠软代价 (optimization/obstacle_clearance)
+         兜底, 而软代价在小违反量时很弱 (cost = w * (clearance-dist)^3)。
+         取 0.2 -> 硬边界约 0.25 m, 至少覆盖机身半宽 0.235 m。
+         注: 本环境的随机森林 min_distance=0.8 m, 膨胀再大 (>=0.4) 会把缝堵死,
+         所以别超过 0.25。 -->
+    <!-- L1 第三轮 (2026-10-13, 几何复现 + 日志复盘) 结论补充:
+         · 本 world 的柱面最窄间隙是 1.199 m (不是 0.8 m), 所以 0.35 (inf_step=4,
+           硬边界 0.412 m) **不会**把任何缝堵死 —— 离线穿越测试 (6 处最窄缝 + 3 个
+           场角) 全部可达, 且最优路径全程"机体不擦碰"; 相反 0.3 的硬边界只有
+           0.316 m, 直接允许机体插进柱子 3.2 cm。
+         · 若实测出现"A* 找不到路径/被堵死", 优先降 planning_horizon 或换目标点,
+           不要靠降 inflation 解决 —— 那等于放弃机体半径的安全边界。
+         · 回退对比 (命令行直接覆盖): roslaunch sim_utils formation.launch \
+             obstacles_inflation:=0.3 planning_horizon:=7.5 max_vel:=1.5 -->
+    <param name="grid_map/obstacles_inflation"    value="$(arg obstacles_inflation)" /> 
+    <param name="grid_map/local_map_margin"       value="10"/>
+    <param name="grid_map/ground_height"          value="-0.01"/>
+    <!-- camera parameter -->
+    <param name="grid_map/cx" value="$(arg cx)"/>
+    <param name="grid_map/cy" value="$(arg cy)"/>
+    <param name="grid_map/fx" value="$(arg fx)"/>
+    <param name="grid_map/fy" value="$(arg fy)"/>
+    <!-- depth filter -->
+    <param name="grid_map/use_depth_filter"       value="true"/>
+    <param name="grid_map/depth_filter_tolerance" value="0.15"/>
+    <param name="grid_map/depth_filter_maxdist"   value="5.0"/>
+    <!-- depth_filter_mindist: 近距深度点的**丢弃**门限 (grid_map.cpp:302 的 continue)。
+         原值 0.2 m 是给真实深度相机(D435 近距不可测)设的; 本工程输入是
+         pcl_render_node 从 FAST-LIO 点云渲染出的 depth 图, 不存在自机/无效点,
+         保留 0.2 只会和 LiDAR 的 0.3 m 物理盲区叠成"双重盲区": 机体贴障时
+         该方向直接无点 -> 被当成"最远" -> 反而把障碍清掉(见 grid_map.cpp
+         raycastProcess 里的近距保护注释)。降到 0.05 m。 -->
+    <param name="grid_map/depth_filter_mindist"   value="0.05"/>
+    <param name="grid_map/depth_filter_margin"    value="2"/>
+    <param name="grid_map/k_depth_scaling_factor" value="1000.0"/>
+    <param name="grid_map/skip_pixel"             value="2"/>
+    <!-- local fusion -->
+    <param name="grid_map/p_hit"  value="0.65"/>
+    <!-- p_miss 是 raycast 的"清障"速率: 每帧每格 -logit(p_miss)。
+         0.35 -> -0.62/帧, 而饱和值 logit(p_max=0.90)=+2.20、障碍门限
+         logit(p_occ=0.80)=+1.39 -> **只要 2 帧就跌破门限**。所以一旦某方向上
+         "观测消失"(雷达盲区/遮挡), 该处障碍 0.2 s 内就会从地图上被擦掉。
+         想更抗误清可提到 0.45 (-0.20/帧, 需 4 帧), 代价是正常的动态障碍/多机
+         互见清得也慢。当前靠 min_ray_length 近距保护 + inflation 0.35 解决。 -->
+    <param name="grid_map/p_miss" value="0.35"/>
+    <param name="grid_map/p_min"  value="0.12"/>
+    <param name="grid_map/p_max"  value="0.90"/>
+    <param name="grid_map/p_occ"  value="0.80"/>
+    <!-- min_ray_length: raycast 的**近距保护半径** (radius[m], 需重编译 plan_env 生效!)
+         grid_map.cpp 的 raycastProcess 里把原版被注释掉的
+           `if (length < mp_.min_ray_length_) break;`
+         改成了 `if (min_ray_length > 0 && length < min_ray_length) continue;`
+         → 机体周围这个半径内的格子不再做 miss 清障, 防止"贴近障碍时雷达盲区
+         使障碍点消失 -> 射线把障碍格擦成自由 -> 规划器认为可通过 -> 擦碰"。
+         0.5 m > 机体含桨尖半径 0.348 m + 跟踪误差余量; 设 0 可退回旧行为。 -->
+    <param name="grid_map/min_ray_length" value="$(arg min_ray_length)"/>
+    <param name="grid_map/max_ray_length" value="4.5"/>
+  
+    <!-- virtual_ceil_height: 已改成可由 launch 覆盖(默认 2.0, 见文件头的 arg 说明)。
+         4.5 -> 2.0 是为了让"地图可靠建高(z_机+1.41 m)"覆盖整个飞行高度带,
+         消除柱顶上方(maps 里为空的)假空白 -> 规划器不再试图从 z 轴抬高穿越。 -->
+    <param name="grid_map/virtual_ceil_height"              value="$(arg virtual_ceil_height)"/>
+    <param name="grid_map/visualization_truncate_height"    value="4.2"/>
+    <param name="grid_map/show_occ_time"                    value="false"/>
+    <param name="grid_map/pose_type"                        value="1"/>  
+    <param name="grid_map/frame_id"                         value="world"/>
+
+    <!-- sdf map -->
+    <param name="grid_map/local_bound_inflate"   value="0.0"/>
+    <param name="grid_map/show_esdf_time"                  value="false"/>
+    <param name="grid_map/esdf_slice_height"               value="0.3"/>
+
+  <!-- planner manager -->
+    <param name="manager/max_vel"                           value="$(arg max_vel)" type="double"/>
+    <param name="manager/max_acc"                           value="$(arg max_acc)" type="double"/>
+    <param name="manager/control_points_distance"           value="0.4" type="double"/>
+    <param name="manager/polyTraj_piece_length"             value="2.0" type="double"/>
+    <param name="manager/feasibility_tolerance"             value="0.1" type="double"/>
+    <param name="manager/planning_horizon"                  value="$(arg planning_horizon)" type="double"/>
+    <param name="manager/use_distinctive_trajs"             value="$(arg use_distinctive_trajs)" type="bool"/>
+    <param name="manager/drone_id"                          value="$(arg drone_id)"/>
+
+  <!-- trajectory optimization -->
+    <param name="optimization/constrain_points_perPiece"    value="3" type="int"/>
+    
+    <!-- <param name="optimization/weight_obstacle"              value="$(arg weight_obstacle)"/>
+    <param name="optimization/weight_swarm"                 value="$(arg weight_swarm)"/>
+    <param name="optimization/weight_feasibility"           value="$(arg weight_feasibility)"/>
+    <param name="optimization/weight_sqrvariance"           value="$(arg weight_sqrvariance)"/>
+    <param name="optimization/weight_time"                  value="$(arg weight_time)"/>
+    <param name="optimization/weight_formation"             value="$(arg weight_formation)"/>
+    
+    <param name="optimization/obstacle_clearance"           value="$(arg obstacle_clearance)"/>
+    <param name="optimization/swarm_clearance"              value="$(arg swarm_clearance)"/> -->
+    
+    <param name="optimization/max_vel"                      value="$(arg max_vel)" type="double"/>
+    <param name="optimization/max_acc"                      value="$(arg max_acc)" type="double"/>
+    <!-- <param name="optimization/formation_type"               value="$(arg formation_type)"/> -->
+    
+    <param name="optimization/record_opt" value="true"/>
+  </node>
+
+</launch>

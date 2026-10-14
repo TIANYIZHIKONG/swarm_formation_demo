@@ -1,0 +1,117 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <model name="lidar3d">
+    <!-- 3D LiDAR: GPU ray, 16 beams, 360 deg, 10 Hz -> sensor_msgs/PointCloud2 -->
+    <link name="lidar_link">
+      <pose>0 0 0 0 0 0</pose>
+      <inertial>
+        <mass>0.1</mass>
+        <inertia>
+          <ixx>1e-5</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>1e-5</iyy>
+          <iyz>0</iyz>
+          <izz>1e-5</izz>
+        </inertia>
+      </inertial>
+      <visual name="visual">
+        <geometry>
+          <cylinder>
+            <radius>0.045</radius>
+            <length>0.09</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/DarkGrey</name>
+          </script>
+        </material>
+      </visual>
+
+      <sensor name="lidar3d" type="gpu_ray">
+        <always_on>1</always_on>
+        <visualize>false</visualize>
+        <update_rate>10</update_rate>
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>1200</samples>
+              <resolution>1</resolution>
+              <min_angle>-3.14159265</min_angle>
+              <max_angle>3.14159265</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>16</samples>
+              <resolution>1</resolution>
+              <min_angle>-0.26179939</min_angle>
+              <max_angle>0.26179939</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.3</min>
+            <max>40.0</max>
+            <resolution>0.01</resolution>
+          </range>
+        </ray>
+        <!-- 若显卡/OGRE 上下文不可用，可把 sensor 改为 type="ray" 并把插件换成
+             libgazebo_ros_velodyne_laser.so (CPU 版本, 点数建议减半)          -->
+        <plugin name="gazebo_ros_lidar3d" filename="libgazebo_ros_velodyne_gpu_laser.so">
+          <topicName>/drone_0/points</topicName>
+          <frameName>lidar_link</frameName>
+          <organize_cloud>false</organize_cloud>
+          <min_range>0.3</min_range>
+          <max_range>40.0</max_range>
+        </plugin>
+      </sensor>
+    </link>
+
+    <!-- IMU: sensor_msgs/Imu, 200 Hz -->
+    <link name="imu_link">
+      <!-- 与 lidar_link 原点重合，这样 FAST-LIO 的 extrinsic_T=[0,0,0] 就是精确的 -->
+      <pose>0 0 0 0 0 0</pose>
+      <inertial>
+        <mass>0.01</mass>
+        <inertia>
+          <ixx>1e-6</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>1e-6</iyy>
+          <iyz>0</iyz>
+          <izz>1e-6</izz>
+        </inertia>
+      </inertial>
+      <sensor name="imu_sensor" type="imu">
+        <always_on>1</always_on>
+        <update_rate>200</update_rate>
+        <imu>
+          <angular_velocity>
+            <x><noise type="gaussian"><mean>0.0</mean><stddev>0.0002</stddev><bias_mean>0.0</bias_mean><bias_stddev>0.0</bias_stddev></noise></x>
+            <y><noise type="gaussian"><mean>0.0</mean><stddev>0.0002</stddev><bias_mean>0.0</bias_mean><bias_stddev>0.0</bias_stddev></noise></y>
+            <z><noise type="gaussian"><mean>0.0</mean><stddev>0.0002</stddev><bias_mean>0.0</bias_mean><bias_stddev>0.0</bias_stddev></noise></z>
+          </angular_velocity>
+          <linear_acceleration>
+            <x><noise type="gaussian"><mean>0.0</mean><stddev>0.001</stddev><bias_mean>0.0</bias_mean><bias_stddev>0.0</bias_stddev></noise></x>
+            <y><noise type="gaussian"><mean>0.0</mean><stddev>0.001</stddev><bias_mean>0.0</bias_mean><bias_stddev>0.0</bias_stddev></noise></y>
+            <z><noise type="gaussian"><mean>0.0</mean><stddev>0.001</stddev><bias_mean>0.0</bias_mean><bias_stddev>0.0</bias_stddev></noise></z>
+          </linear_acceleration>
+        </imu>
+        <plugin name="gazebo_ros_imu" filename="libgazebo_ros_imu_sensor.so">
+          <topicName>/drone_0/imu</topicName>
+          <frameName>imu_link</frameName>
+          <!-- 注意: 这个插件不读 sensor 层的 <update_rate>, 而是读插件层的
+               <updateRateHZ>; 不写就默认 1 Hz! FAST-LIO 需要 ~200 Hz IMU。 -->
+          <updateRateHZ>200</updateRateHZ>
+          <initial_orientation_as_reference>false</initial_orientation_as_reference>
+          <gaussianNoise>0.0</gaussianNoise>
+        </plugin>
+      </sensor>
+    </link>
+
+    <joint name="imu_joint" type="fixed">
+      <parent>lidar_link</parent>
+      <child>imu_link</child>
+    </joint>
+  </model>
+</sdf>

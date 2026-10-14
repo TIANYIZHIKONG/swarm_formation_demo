@@ -1,0 +1,195 @@
+<launch>
+  <!-- ==========================================================================
+       多机编队仿真 (Gazebo + PX4 SITL + FAST-LIO + Swarm-Formation + RViz)
+
+       用法:
+         # 终端1: 起整个仿真 (默认 3 架)
+         roslaunch sim_utils formation.launch num_drones:=3
+         # 终端2: 看 RViz
+         roslaunch sim_utils formation_rviz.launch
+         # 然后在 RViz 工具栏点 "2D Nav Goal" 选一个编队中心点 ->
+         # 所有无人机会各自飞到 relative_pos_<id> 阵位上 (编队飞行)
+
+       前置条件:
+         · source TECH/sim_assets/env.sh   (PX4/GAZEBO 路径 + devel/setup.bash)
+         · per-drone 的 SDF 已生成 (run_formation.sh 会自动做; 手动跑本 launch
+           前请先执行 sim_assets/scripts/gen_multi_models.sh)
+
+       编队形状/间距在 Swarm-Formation 的 config/normal_hexagon.yaml 里:
+         global_goal/identical → relative_pos_0..6 和 swarm_scale
+       ========================================================================== -->
+
+  <arg name="num_drones" default="3"/>
+  <arg name="gui"        default="true"/>
+  <arg name="world"      default="$(env SIM_ASSETS_DIR)/worlds/formation.world"/>
+
+  <!-- 起飞点布局: 沿 y 轴一字排开 (第 i 架在 start + spacing*i) -->
+  <arg name="start_x" default="0.0"/>
+  <arg name="start_y" default="0.0"/>
+  <arg name="spacing" default="2.0"/>
+
+  <!-- 飞行限幅 (L1 安全调参 2026-10-13, 第二轮)
+       原值 1.5 / 6.0 (drone_all.launch 的通用默认). 单机实测: max_acc=6 m/s²
+       时姿态倾角大 + 视觉定位跟踪滞后 (~0.1~0.3 m), 容易擦碰障碍.
+       第一轮降到 1.0 / 3.0 后仍有擦碰(实测机体中心贴到障碍膨胀面仅 0.009 m),
+       第二轮再降到 0.8 / 2.5: 轨迹跟踪滞后 ~ v², 贴近障碍时过冲更小, 同时给
+       0.3 s 周期的重规划留出反应距离.
+       第二轮实测 (0.8/2.5, 配合 inflation 0.35 / clearance 0.7 / 重规划 0.3 s):
+       路过柱子的场景最小机体-柱面间距 0.805 m (余量 0.457 m), 到达误差 6 cm,
+       不再擦碰; 极端场景(目标在柱心)余量 0.863 m。
+       多机若要恢复原值: roslaunch sim_utils formation.launch max_vel:=1.5 max_acc:=6.0
+       第三轮 (2026-10-13): 几何复现建议 max_vel 1.5 -> 1.0 (为重规划留反应距离);
+       这里**保持更保守的 0.8** —— 0.1 s 的重规划周期在 0.8 m/s 下只前进 8 cm,
+       1.0 m/s 前进 10 cm, 而跟踪滞后 ~ v², 多机编队穿 1.2 m 窄缝时 0.8 更稳。
+       drone_all.launch 的通用默认已同步为 1.0 (单机/未指定参数时的值)。 -->
+  <arg name="max_vel" default="0.8"/>
+  <arg name="max_acc" default="2.5"/>
+
+  <!-- 第三轮 (2026-10-13): 这两个参数原来在 formation.launch 里**没有声明**,
+       命令行传不进来, 实际生效的是 drone_all.launch 的默认值 (7.5 / 0.35)。
+       现在显式透传, 便于对比实验:
+         · obstacles_inflation 0.35 -> inf_step=4 体素, 地图硬边界 0.412 m, 刚超过
+           机体含桨尖半径 0.348 m (0.3 时只有 0.316 m, 规划器允许擦碰 3.2 cm);
+         · planning_horizon 5.0 <= 感知半径 (depth_filter_maxdist 5.0 / max_ray_length
+           4.5), 避免 EGO 在"未观测区"提前画好轨迹导致障碍"闪入"。
+       回退到旧组合: roslaunch sim_utils formation.launch \
+           obstacles_inflation:=0.3 planning_horizon:=7.5 max_vel:=1.5 max_acc:=6.0 -->
+  <arg name="obstacles_inflation" default="0.35"/>
+  <arg name="planning_horizon"    default="5.0"/>
+  <!-- min_ray_length (第三轮新增): raycast 近距保护半径 = 0.5 m (> 机体含桨尖
+       半径 0.348 m)。见 grid_map.cpp:raycastProcess 的"近距保护"注释:
+       原来射线从机体中心一路做 miss 清障, 一旦 LiDAR 盲区(0.3 m)让柱面点消失,
+       柱子的占据格 2 帧(0.2 s)内就会被擦成"自由" -> 规划器认为可穿过 -> 擦碰。
+       这一支**需要重编译 plan_env** 才生效; 旧的二进制忽略它(安全)。
+       A/B 对比: roslaunch sim_utils formation.launch min_ray_length:=0 -->
+  <arg name="min_ray_length" default="0.5"/>
+  <!-- virtual_ceil_height (第四轮新增): 虚拟天花板高度 = 2.0 m。这是本工程**唯一**
+       能限制飞行海拔的硬约束, 用来把规划器压回"准 2D 迷宫"。
+       原因: world 柱体真值高 2.5~3.46 m, 但 LiDAR 垂直 FOV 只有 ±15° 且
+       max_ray_length=4.5 m 之外的点只清障不记障 -> 地图里柱子最高只建到
+       z_机+1.41 m, 柱顶上方是"假空白" -> A* 会从上方绕过去撞柱身。
+       压到 2.0 后, 飞行带 [0.3,1.6] m 全落在"地图可靠建高区"(>=1.9 m) 内。
+       需要真 3D 任务时: roslaunch sim_utils formation.launch virtual_ceil_height:=4.5
+       验证工具: python3 $TECH/sim_assets/scripts/diag/height_probe.py 5 0 -->
+  <arg name="virtual_ceil_height" default="2.0"/>
+
+  <!-- 传感器安装位置 (与 gen_drone_sdf.py 的 <pose> 一致) -->
+  <arg name="mount_x" default="0.05"/>
+  <arg name="mount_z" default="0.20"/>
+
+  <arg name="takeoff_height"  default="0.5"/>
+  <arg name="broadcast_ip"    default="127.0.0.255"/>
+  <!-- FAST-LIO 延迟启动秒数, 等 Gazebo/IMU 稳定 -->
+  <arg name="lio_start_delay" default="25"/>
+
+  <!-- ================================== Gazebo 世界 ================================== -->
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name" value="$(arg world)"/>
+    <arg name="gui"        value="$(arg gui)"/>
+    <arg name="paused"     value="false"/>
+    <arg name="use_sim_time" value="true"/>
+  </include>
+
+  <!-- =============================== drone 0 ============================== -->
+  <include file="$(find sim_utils)/launch/drone_all.launch">
+    <arg name="ID" value="0"/>
+    <arg name="max_vel" value="$(arg max_vel)"/>
+    <arg name="max_acc" value="$(arg max_acc)"/>
+    <arg name="obstacles_inflation" value="$(arg obstacles_inflation)"/>
+    <arg name="min_ray_length"       value="$(arg min_ray_length)"/>
+    <arg name="virtual_ceil_height" value="$(arg virtual_ceil_height)"/>
+    <arg name="planning_horizon"    value="$(arg planning_horizon)"/>
+    <arg name="start_x" value="$(arg start_x)"/>
+    <arg name="start_y" value="$(arg start_y)"/>
+    <arg name="spacing" value="$(arg spacing)"/>
+    <arg name="mount_x" value="$(arg mount_x)"/>
+    <arg name="mount_z" value="$(arg mount_z)"/>
+    <arg name="takeoff_height"  value="$(arg takeoff_height)"/>
+    <arg name="broadcast_ip"    value="$(arg broadcast_ip)"/>
+    <arg name="lio_start_delay" value="$(arg lio_start_delay)"/>
+  </include>
+
+  <!-- =============================== drone 1 ============================== -->
+  <group if="$(eval int(arg('num_drones')) > 1)">
+    <include file="$(find sim_utils)/launch/drone_all.launch">
+      <arg name="ID" value="1"/>
+      <arg name="max_vel" value="$(arg max_vel)"/>
+      <arg name="max_acc" value="$(arg max_acc)"/>
+      <arg name="obstacles_inflation" value="$(arg obstacles_inflation)"/>
+      <arg name="min_ray_length"       value="$(arg min_ray_length)"/>
+      <arg name="virtual_ceil_height" value="$(arg virtual_ceil_height)"/>
+      <arg name="planning_horizon"    value="$(arg planning_horizon)"/>
+      <arg name="start_x" value="$(arg start_x)"/>
+      <arg name="start_y" value="$(arg start_y)"/>
+      <arg name="spacing" value="$(arg spacing)"/>
+      <arg name="mount_x" value="$(arg mount_x)"/>
+      <arg name="mount_z" value="$(arg mount_z)"/>
+      <arg name="takeoff_height"  value="$(arg takeoff_height)"/>
+      <arg name="broadcast_ip"    value="$(arg broadcast_ip)"/>
+      <arg name="lio_start_delay" value="$(arg lio_start_delay)"/>
+    </include>
+  </group>
+
+  <!-- =============================== drone 2 ============================== -->
+  <group if="$(eval int(arg('num_drones')) > 2)">
+    <include file="$(find sim_utils)/launch/drone_all.launch">
+      <arg name="ID" value="2"/>
+      <arg name="max_vel" value="$(arg max_vel)"/>
+      <arg name="max_acc" value="$(arg max_acc)"/>
+      <arg name="obstacles_inflation" value="$(arg obstacles_inflation)"/>
+      <arg name="min_ray_length"       value="$(arg min_ray_length)"/>
+      <arg name="virtual_ceil_height" value="$(arg virtual_ceil_height)"/>
+      <arg name="planning_horizon"    value="$(arg planning_horizon)"/>
+      <arg name="start_x" value="$(arg start_x)"/>
+      <arg name="start_y" value="$(arg start_y)"/>
+      <arg name="spacing" value="$(arg spacing)"/>
+      <arg name="mount_x" value="$(arg mount_x)"/>
+      <arg name="mount_z" value="$(arg mount_z)"/>
+      <arg name="takeoff_height"  value="$(arg takeoff_height)"/>
+      <arg name="broadcast_ip"    value="$(arg broadcast_ip)"/>
+      <arg name="lio_start_delay" value="$(arg lio_start_delay)"/>
+    </include>
+  </group>
+
+  <!-- =============================== drone 3 ============================== -->
+  <group if="$(eval int(arg('num_drones')) > 3)">
+    <include file="$(find sim_utils)/launch/drone_all.launch">
+      <arg name="ID" value="3"/>
+      <arg name="max_vel" value="$(arg max_vel)"/>
+      <arg name="max_acc" value="$(arg max_acc)"/>
+      <arg name="obstacles_inflation" value="$(arg obstacles_inflation)"/>
+      <arg name="min_ray_length"       value="$(arg min_ray_length)"/>
+      <arg name="virtual_ceil_height" value="$(arg virtual_ceil_height)"/>
+      <arg name="planning_horizon"    value="$(arg planning_horizon)"/>
+      <arg name="start_x" value="$(arg start_x)"/>
+      <arg name="start_y" value="$(arg start_y)"/>
+      <arg name="spacing" value="$(arg spacing)"/>
+      <arg name="mount_x" value="$(arg mount_x)"/>
+      <arg name="mount_z" value="$(arg mount_z)"/>
+      <arg name="takeoff_height"  value="$(arg takeoff_height)"/>
+      <arg name="broadcast_ip"    value="$(arg broadcast_ip)"/>
+      <arg name="lio_start_delay" value="$(arg lio_start_delay)"/>
+    </include>
+  </group>
+
+  <!-- =============================== drone 4 ============================== -->
+  <group if="$(eval int(arg('num_drones')) > 4)">
+    <include file="$(find sim_utils)/launch/drone_all.launch">
+      <arg name="ID" value="4"/>
+      <arg name="max_vel" value="$(arg max_vel)"/>
+      <arg name="max_acc" value="$(arg max_acc)"/>
+      <arg name="obstacles_inflation" value="$(arg obstacles_inflation)"/>
+      <arg name="min_ray_length"       value="$(arg min_ray_length)"/>
+      <arg name="virtual_ceil_height" value="$(arg virtual_ceil_height)"/>
+      <arg name="planning_horizon"    value="$(arg planning_horizon)"/>
+      <arg name="start_x" value="$(arg start_x)"/>
+      <arg name="start_y" value="$(arg start_y)"/>
+      <arg name="spacing" value="$(arg spacing)"/>
+      <arg name="mount_x" value="$(arg mount_x)"/>
+      <arg name="mount_z" value="$(arg mount_z)"/>
+      <arg name="takeoff_height"  value="$(arg takeoff_height)"/>
+      <arg name="broadcast_ip"    value="$(arg broadcast_ip)"/>
+      <arg name="lio_start_delay" value="$(arg lio_start_delay)"/>
+    </include>
+  </group>
+</launch>

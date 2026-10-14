@@ -1,0 +1,19 @@
+<launch>
+    <!-- 参数设置 -->
+    <arg name="window_size"   default="50" />
+    <arg name="publish_rate"  default="30.0" />
+    <arg name="vision_pose_topic"  default="/Odometry" />
+    <!-- <arg name="vision_pose_topic"  default="/vins_fusion/odometry" /> -->
+    <!-- <arg name="vision_pose_topic"  default="/aft_mapped_to_init" /> -->
+    <node pkg="to_mavros" type="vision2mavros" name="vision2mavros" output="screen">
+
+        <!-- 私有参数 -->
+        <param name="window_size"  value="$(arg window_size)" />
+        <param name="publish_rate" value="$(arg publish_rate)" />
+        <param name="vision_pose_topic"  value="$(arg vision_pose_topic)" />
+        <!-- body -> lidar 平移（单位：米）-->
+        <param name="body_lidar_x" value="0.0"/>
+        <param name="body_lidar_y" value="0.0"/>
+        <param name="body_lidar_z" value="0.0"/>
+    </node>
+</launch>

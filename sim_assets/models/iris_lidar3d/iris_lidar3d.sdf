@@ -1,0 +1,24 @@
+<?xml version="1.0" ?>
+<sdf version="1.5">
+  <!-- PX4 iris 机体 + 3D LiDAR / IMU（ROS 话题）
+       用法: spawn_model -model iris -file <this file>
+       依赖 GAZEBO_MODEL_PATH 同时包含:
+         - 本目录 (models/)
+         - PX4 的 mavlink_sitl_gazebo/models (提供 model://iris)
+  -->
+  <model name="iris_lidar3d">
+    <include>
+      <uri>model://iris</uri>
+    </include>
+
+    <include>
+      <uri>model://lidar3d</uri>
+      <pose>0.05 0 0.20 0 0 0</pose>
+    </include>
+
+    <joint name="lidar3d_joint" type="fixed">
+      <child>lidar3d::lidar_link</child>
+      <parent>iris::base_link</parent>
+    </joint>
+  </model>
+</sdf>

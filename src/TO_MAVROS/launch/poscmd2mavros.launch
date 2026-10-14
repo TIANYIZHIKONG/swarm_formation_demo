@@ -1,0 +1,40 @@
+<launch>
+    <!-- ego-planner 的 quadrotor_msgs/PositionCommand  ->  /mavros/setpoint_raw/local -->
+    <arg name="poscmd_topic"      default="/drone_0_planning/pos_cmd" />
+    <arg name="control_rate"      default="50.0" />
+    <!-- 0: 位置+速度前馈+yaw (推荐, PX4 位置环闭环)
+         1: 速度+yaw_rate          (更激进, 需要自己调参) -->
+    <arg name="control_mode"      default="0" />
+    <arg name="auto_arm"          default="true" />
+    <!-- true: 先起飞到 takeoff_height 再交给 ego-planner 跟踪 -->
+    <arg name="takeoff_enable"    default="false" />
+    <arg name="takeoff_height"    default="1.0" />
+    <arg name="takeoff_tol"       default="0.25" />
+    <arg name="cmd_timeout"       default="0.5" />
+    <arg name="auto_land_on_finish" default="true" />
+    <arg name="max_vel"           default="5.0" />
+    <arg name="max_yaw_rate"      default="1.0" />
+    <!-- pos_cmd 所在的公共 world 系原点, 相对本机起飞点(mavros 本地 ENU 原点)
+         的位置. 单机仿真/实飞时为 (0,0,0); 多机编队时由 launch 传入本机起飞点.
+         不加这个修正, 第 i 架会把 world 绝对坐标当本地坐标 -> 整机平移 S_i. -->
+    <arg name="origin_x"          default="0.0" />
+    <arg name="origin_y"          default="0.0" />
+    <arg name="origin_z"          default="0.0" />
+
+    <node pkg="to_mavros" type="poscmd2mavros" name="poscmd2mavros" output="screen">
+        <param name="poscmd_topic"         value="$(arg poscmd_topic)" />
+        <param name="control_rate"         value="$(arg control_rate)" />
+        <param name="control_mode"         value="$(arg control_mode)" />
+        <param name="auto_arm"             value="$(arg auto_arm)" />
+        <param name="takeoff_enable"       value="$(arg takeoff_enable)" />
+        <param name="takeoff_height"       value="$(arg takeoff_height)" />
+        <param name="takeoff_tol"          value="$(arg takeoff_tol)" />
+        <param name="cmd_timeout"          value="$(arg cmd_timeout)" />
+        <param name="auto_land_on_finish"  value="$(arg auto_land_on_finish)" />
+        <param name="max_vel"              value="$(arg max_vel)" />
+        <param name="max_yaw_rate"         value="$(arg max_yaw_rate)" />
+        <param name="origin_x"             value="$(arg origin_x)" />
+        <param name="origin_y"             value="$(arg origin_y)" />
+        <param name="origin_z"             value="$(arg origin_z)" />
+    </node>
+</launch>

@@ -1,0 +1,395 @@
+diff --git a/src/planner/plan_manage/include/plan_manage/ego_replan_fsm.h b/src/planner/plan_manage/include/plan_manage/ego_replan_fsm.h
+index 87f1281..cf9af74 100644
+--- a/src/planner/plan_manage/include/plan_manage/ego_replan_fsm.h
++++ b/src/planner/plan_manage/include/plan_manage/ego_replan_fsm.h
+@@ -63,6 +63,13 @@ namespace ego_planner
+     bool flag_realworld_experiment_;
+     bool enable_fail_safe_;
+ 
++    /* 目标点(RViz 2D Nav Goal / 预设航点)安全检查, 详见 checkGoalSafety() */
++    bool goal_check_enable_;  // fsm/goal_check_enable, 默认 true
++    bool goal_check_strict_;  // fsm/goal_check_strict, 默认 false
++    bool goal_check_los_;     // fsm/goal_check_los, 默认 true
++    double goal_check_radius_; // fsm/goal_check_radius, 默认 0.5 m
++    Eigen::Vector3d local_map_range_; // grid_map/local_update_range_{x,y,z}: 本地地图盒子半边长
++
+     /* planning data */
+     bool have_trigger_, have_target_, have_odom_, have_new_target_, have_recv_pre_agent_;
+     FSM_EXEC_STATE exec_state_;
+@@ -112,6 +119,9 @@ namespace ego_planner
+     bool checkCollision();
+     void publishSwarmTrajs(bool startup_pub);
+ 
++    /* 目标点安全检查: 0=通过(已验证), 1=有占据格/出地图, 2=有未观测(unknown)格, 3=目标点在本地地图盒子外, 4=目标点被已知障碍遮挡(视线不通) */
++    int checkGoalSafety(const Eigen::Vector3d &goal, int &bad_cells, int &total_cells);
++
+   public:
+     EGOReplanFSM(/* args */)
+     {
+diff --git a/src/planner/plan_manage/launch/advanced_param.xml b/src/planner/plan_manage/launch/advanced_param.xml
+index 7f7b438..91ad36b 100644
+--- a/src/planner/plan_manage/launch/advanced_param.xml
++++ b/src/planner/plan_manage/launch/advanced_param.xml
+@@ -39,6 +39,16 @@
+ 
+   <arg name="obj_num_set"/>
+ 
++  <!-- 目标点安全检查: 见 ego_replan_fsm.cpp::checkGoalSafety()。
++       默认 false: 只拒绝"占据/出地图"的目标点(未观测/盒外的点给警告后放行)。
++       true  : 连"未观测(unknown)/本地地图盒外"的目标点也拒绝。 -->
++  <arg name="goal_check_strict" default="false"/>
++
++  <!-- 目标点视线检查: 邻域无法验证时, 若无人机->目标点的直线穿过"已观测到的占据格"
++       (目标点在已知墙后面), 局部规划器会掉进局部极小规划出穿墙轨迹 -> 直接拒绝。
++       false = 关掉(放行, 只给警告)。 -->
++  <arg name="goal_check_los" default="true"/>
++
+   <arg name="drone_id"/>
+ 
+ 
+@@ -68,6 +78,18 @@
+     <param name="fsm/realworld_experiment" value="false"/>
+     <param name="fsm/fail_safe" value="true"/>
+ 
++    <!-- 目标点(RViz 2D Nav Goal / 预设航点)安全检查, 详见 ego_replan_fsm.cpp::checkGoalSafety()。
++         enable : 总开关, 检查目标点周围球内是否有 占据/膨胀层/出地图;
++         radius : 检查球半径(m), 应 >= 机体半径 + 地图膨胀;
++         strict : 连"未观测(unknown)/本地地图盒外"的目标点也拒绝。注意本仿真的地图由点云
++                  驱动, 只标"占据"不标"空闲", 所以盒内任何点都是 unknown —— strict 一开,
++                  距飞机 ±5.5m 内将没有任何目标点能通过(实测 (6.0,1.2) 也是 515/515 unknown),
++                  只适合把雷达路径/射线投射打开后再用。 -->
++    <param name="fsm/goal_check_enable" value="true"/>
++    <param name="fsm/goal_check_radius" value="0.5"/>
++    <param name="fsm/goal_check_strict" value="$(arg goal_check_strict)"/>
++    <param name="fsm/goal_check_los" value="$(arg goal_check_los)"/>
++
+     <param name="fsm/waypoint_num" value="$(arg point_num)" type="int"/>
+     <param name="fsm/waypoint0_x" value="$(arg point0_x)" type="double"/>
+     <param name="fsm/waypoint0_y" value="$(arg point0_y)" type="double"/>
+diff --git a/src/planner/plan_manage/launch/default.rviz b/src/planner/plan_manage/launch/default.rviz
+index 5a1a196..160528d 100644
+--- a/src/planner/plan_manage/launch/default.rviz
++++ b/src/planner/plan_manage/launch/default.rviz
+@@ -191,6 +191,36 @@ Visualization Manager:
+       Use Fixed Frame: true
+       Use rainbow: true
+       Value: true
++    - Alpha: 0.9
++      Autocompute Intensity Bounds: true
++      Autocompute Value Bounds:
++        Max Value: 3
++        Min Value: 0
++        Value: false
++      Axis: Z
++      Channel Name: intensity
++      Class: rviz/PointCloud2
++      Color: 255; 160; 0
++      Color Transformer: FlatColor
++      Decay Time: 0
++      Enabled: true
++      Invert Rainbow: false
++      Max Color: 255; 255; 255
++      Max Intensity: 4096
++      Min Color: 0; 0; 0
++      Min Intensity: 0
++      Name: LiDAR(/cloud_registered)
++      Position Transformer: XYZ
++      Queue Size: 5
++      Selectable: true
++      Size (Pixels): 2
++      Size (m): 0.05000000074505806
++      Style: Points
++      Topic: /cloud_registered
++      Unreliable: false
++      Use Fixed Frame: true
++      Use rainbow: false
++      Value: true
+     - Class: rviz/Group
+       Displays:
+         - Class: rviz/Group
+@@ -2959,26 +2989,21 @@ Visualization Manager:
+   Value: true
+   Views:
+     Current:
+-      Class: rviz/ThirdPersonFollower
+-      Distance: 52.77322769165039
++      Angle: 0
++      Class: rviz/TopDownOrtho
+       Enable Stereo Rendering:
+         Stereo Eye Separation: 0.05999999865889549
+         Stereo Focal Distance: 1
+         Swap Stereo Eyes: false
+         Value: false
+-      Field of View: 0.7853981852531433
+-      Focal Point:
+-        X: -10.308119773864746
+-        Y: -0.9097803831100464
+-        Z: -9.5367431640625e-07
+-      Focal Shape Fixed Size: true
+-      Focal Shape Size: 0.05000000074505806
+       Invert Z Axis: false
+       Name: Current View
+       Near Clip Distance: 0.009999999776482582
+-      Pitch: 1.5697963237762451
++      Scale: 25
+       Target Frame: <Fixed Frame>
+-      Yaw: 3.1415886878967285
++      Value: TopDownOrtho (rviz)
++      X: 0
++      Y: 0
+     Saved:
+       - Class: rviz/FPS
+         Enable Stereo Rendering:
+diff --git a/src/planner/plan_manage/src/ego_replan_fsm.cpp b/src/planner/plan_manage/src/ego_replan_fsm.cpp
+index 65a3290..a45fa03 100644
+--- a/src/planner/plan_manage/src/ego_replan_fsm.cpp
++++ b/src/planner/plan_manage/src/ego_replan_fsm.cpp
+@@ -1,6 +1,8 @@
+ 
+ #include <plan_manage/ego_replan_fsm.h>
+ 
++#include <cmath>
++
+ namespace ego_planner
+ {
+ 
+@@ -22,6 +24,15 @@ namespace ego_planner
+     nh.param("fsm/realworld_experiment", flag_realworld_experiment_, false);
+     nh.param("fsm/fail_safe", enable_fail_safe_, true);
+ 
++    /* 目标点安全检查 (waypointCallback 用, 见 checkGoalSafety 的注释) */
++    nh.param("fsm/goal_check_enable", goal_check_enable_, true);
++    nh.param("fsm/goal_check_strict", goal_check_strict_, false);
++    nh.param("fsm/goal_check_los", goal_check_los_, true);
++    nh.param("fsm/goal_check_radius", goal_check_radius_, 0.5);
++    nh.param("grid_map/local_update_range_x", local_map_range_(0), 5.5);
++    nh.param("grid_map/local_update_range_y", local_map_range_(1), 5.5);
++    nh.param("grid_map/local_update_range_z", local_map_range_(2), 4.5);
++
+     have_trigger_ = !flag_realworld_experiment_;
+ 
+     nh.param("fsm/waypoint_num", waypoint_num_, -1);
+@@ -208,17 +219,208 @@ namespace ego_planner
+     init_pt_ = odom_pos_;
+   }
+ 
++  /**
++   * @brief 目标点安全检查 (waypointCallback 调用)
++   *
++   * 为什么不能只查目标点这一格 —— 这就是之前"RViz 点目标 -> 撞墙坠机"的根因:
++   *   · 本仿真的地图由 FAST-LIO 的配准点云喂入 (/cloud_registered -> grid_map/cloud)。
++   *     cloudCallback() 对每个点只做"膨胀成占据": 在 [无人机 ± local_update_range]
++   *     盒子内把点的 ±1 格(obstacles_inflation=0.099)写成占据; 它不做射线投射,
++   *     所以**从不标记"空闲"**; 概率图/深度那条路(见 grid_map/occupancy 话题)没跑,
++   *     该话题发布出来是 0 个点。
++   *   · 于是地图里其实只有"约 2 格厚的墙皮"。0.4 m 厚的墙, 若目标点落在墙皮内侧
++   *     约 0.2 m 处(正是从墙外斜着点到墙上的常见位置), 单格 getInflateOccupancy()
++   *     查到的是 0 -> 放行 -> 规划器不认识这堵墙, 直接规划穿墙轨迹 -> 撞墙坠机。
++   *     实测: 目标 (5.0, 3.0) 位于墙内, 单格查得 0(放行); 而该点 ±0.5 m 球内有
++   *     291 个占据格(墙面 x≈4.85 处, 来自点云膨胀), 用球就能可靠拦住。
++   *
++   * 因此改成查 目标点周围半径 goal_check_radius 的球, 三类结果:
++   *   1) 球内有 占据 / 膨胀层 / 出地图 (getInflateOccupancy != 0, 或概率图历史上
++   *      命中过 getOccupancy == 1) -> 非法目标点, **一定拒绝**;
++   *   2) 球内(且在本地地图盒子内)有 unknown 格: 该处从未被雷达观测过, 可能藏着
++   *      没看见的墙。但本配置的地图不标空闲格, 于是**任何**盒内的点都会是 unknown ——
++   *      若一律拒绝, ±5.5 m 内一个点都点不了(实测: 距飞机 1.5 m 的空地目标
++   *      (6.0, 1.2) 也是 515/515 unknown)。所以默认只**警告**并放行: 规划器本来就把
++   *      unknown 当 free, 飞行中会靠新观测重规划, 并由 safety_timer 的
++   *      checkCollisionCallback 兜底。想要严格拒绝就置 fsm/goal_check_strict:=true。
++   *   3) 目标点落在本地地图盒子(±local_update_range)之外: 本地地图对它一无所知,
++   *      同样无法校验, 默认警告放行, strict 模式下拒绝。
++   *   4) 视线(LOS)被已知障碍挡住: 当 2)/3) 成立(邻域没法验证)时, 再从无人机沿直线
++   *      采样到目标点, 若中途撞上"已观测到的占据格", 说明目标点在已知墙/柱子后面。
++   *      ego-planner 只有局部规划器(B 样条优化): 目标方向被墙挡死时很容易掉进局部
++   *      极小, 直接返回一条穿墙轨迹(replan 日志里刷 "collided, keep optimizing"),
++   *      仿真里没有额外急停兜底 -> 撞墙坠机。实测: 无人机在 (7.2, 3.0) 时把目标打到
++   *      西墙后面的 (2, 4), 规划器就规划了穿墙轨迹, 无人机撞在东墙上坠机。
++   *      所以这类"看得见已知障碍、看不见目标"的点一律拒绝(可用 fsm/goal_check_los
++   *      =false 关掉), 请先飞到一个能直线看到目标点的位置(例如门洞前), 再下发。
++   *
++   * 参数 (advanced_param.xml, 默认值见 init()):
++   *   fsm/goal_check_enable  (true)  : 总开关
++   *   fsm/goal_check_radius  (0.5 m) : 目标点周围检查球半径(应 >= 机体半径 + 膨胀)
++   *   fsm/goal_check_strict  (false) : true = 连"未观测/盒外"的目标点也拒绝
++   *   fsm/goal_check_los     (true)  : true = 邻域无法验证时, 视线被已知障碍挡住就拒绝
++   *
++   * @return 0 通过(已验证); 1 有占据/出地图; 2 有未观测格; 3 目标点在本地地图盒子外;
++   *         4 目标点被已知障碍遮挡(无人机到目标点的直线穿过已观测的占据格)
++   */
++  int EGOReplanFSM::checkGoalSafety(const Eigen::Vector3d &goal, int &bad_cells, int &total_cells)
++  {
++    bad_cells = 0;
++    total_cells = 0;
++
++    if (!goal_check_enable_)
++      return 0;
++
++    const double res = planner_manager_->grid_map_->getResolution();
++    if (res <= 1e-6) // 分辨率没读到(参数异常), 退化成只查目标点本身
++    {
++      total_cells = 1;
++      bad_cells = (planner_manager_->grid_map_->getInflateOccupancy(goal) == 0) ? 0 : 1;
++      return bad_cells;
++    }
++
++    // 目标点是否落在"每帧都在更新"的本地地图盒子内
++    const Eigen::Vector3d d = (goal - odom_pos_).cwiseAbs();
++    const bool in_local_map = (d(0) <= local_map_range_(0) && d(1) <= local_map_range_(1) && d(2) <= local_map_range_(2));
++
++    const int step = std::max(1, (int)std::ceil(goal_check_radius_ / res)); // 球半径占几格
++    int occ_cells = 0, unknown_cells = 0;
++
++    for (int i = -step; i <= step; ++i)
++      for (int j = -step; j <= step; ++j)
++        for (int k = -step; k <= step; ++k)
++        {
++          if (i * i + j * j + k * k > step * step) // 球形取样, 跳过立方体角
++            continue;
++
++          const Eigen::Vector3d p = goal + Eigen::Vector3d(i, j, k) * res;
++          ++total_cells;
++
++          // getInflateOccupancy: 1=占据/膨胀层, -1=出地图 -> 都不能去
++          // getOccupancy:        1=概率图里历史上观测到过障碍
++          if (planner_manager_->grid_map_->getInflateOccupancy(p) != 0 ||
++              planner_manager_->grid_map_->getOccupancy(p) == 1)
++            ++occ_cells;
++          else if (in_local_map && planner_manager_->grid_map_->isUnknown(p))
++            ++unknown_cells;
++        }
++
++    if (occ_cells > 0)
++    {
++      bad_cells = occ_cells;
++      return 1;
++    }
++
++    // 邻域没法验证(有未观测格 / 点落在本地地图盒子外)时, 再做一次视线检查:
++    // 无人机 -> 目标点 的直线上若撞到"已观测到的占据格", 说明目标点在已知墙后面,
++    // 局部规划器极易掉进局部极小并规划出穿墙轨迹(实测会撞墙坠机) -> 拒绝。
++    if (goal_check_los_ && (unknown_cells > 0 || !in_local_map))
++    {
++      const Eigen::Vector3d seg = goal - odom_pos_;
++      const double len = seg.norm();
++      const int n = std::max(1, (int)std::ceil(len / res));
++      for (int i = 1; i < n; ++i)
++      {
++        const Eigen::Vector3d p = odom_pos_ + seg * ((double)i / (double)n);
++        if ((p - odom_pos_).norm() < goal_check_radius_) // 无人机自身 0.5 m 内的膨胀不算遮挡
++          continue;
++        if (planner_manager_->grid_map_->getInflateOccupancy(p) != 0)
++          return 4;
++      }
++    }
++
++    if (unknown_cells > 0)
++    {
++      bad_cells = unknown_cells;
++      return 2;
++    }
++    if (!in_local_map)
++    {
++      bad_cells = total_cells; // 整个盒子外的点都无法校验, 报告用
++      return 3;
++    }
++    return 0;
++  }
++
+   void EGOReplanFSM::waypointCallback(const geometry_msgs::PoseStampedPtr &msg)
+   {
+     if (msg->pose.position.z < -0.1)
+       return;
+ 
++    Eigen::Vector3d end_wp(msg->pose.position.x, msg->pose.position.y, 1.0);
++
++    // ------------------ 安全闸门 (详见 checkGoalSafety 的注释) ------------------
++    // RViz 的 2D Nav Goal 是把鼠标射线打到 z=0 平面得到 (x,y): 视角一旦倾斜(或点在
++    // 墙体上沿), 射线就会插到墙后面去, 目标点便落在墙体内部。planner 自己不做目标点
++    // 合法性检查, 会照常规划一条穿墙轨迹 -> 撞墙坠机。这里先拦一道。
++    int bad_cells = 0, total_cells = 0;
++    const int goal_state = checkGoalSafety(end_wp, bad_cells, total_cells);
++
++    if (goal_state == 1) // 球内有占据/膨胀层/出地图 -> 坚决拒绝
++    {
++      ROS_WARN("[EGO] Goal (%.2f, %.2f) REJECTED: %d/%d cells around it are occupied or outside the map "
++               "(wall / pillar / inflation layer). Please pick another spot in RViz (TopDown view recommended).",
++               end_wp(0), end_wp(1), bad_cells, total_cells);
++      visualization_->displayGoalPoint(end_wp, Eigen::Vector4d(1, 0, 0, 1), 0.4, 0); // 红球标出被拒点
++      return;
++    }
++
++    if (goal_state == 4) // 目标点在已知障碍后面(视线被挡) -> 局部规划器会规划穿墙轨迹, 拒绝
++    {
++      ROS_WARN("[EGO] Goal (%.2f, %.2f) REJECTED: the straight line from the drone to it crosses KNOWN occupied space, "
++               "i.e. the target is hidden behind a wall / pillar. ego-planner is only a local planner: with the goal "
++               "direction blocked it easily falls into a local minimum and returns a trajectory that goes THROUGH the "
++               "wall (observed in practice -> crash). Fly to a position with line-of-sight first (in front of the "
++               "doorway / around the corner), then re-issue the goal. Set fsm/goal_check_los:=false to disable this check.",
++               end_wp(0), end_wp(1));
++      visualization_->displayGoalPoint(end_wp, Eigen::Vector4d(1, 0, 0, 1), 0.4, 0);
++      return;
++    }
++
++    if (goal_state == 2 || goal_state == 3) // 未观测 / 本地地图盒外 -> 无法校验
++    {
++      if (goal_state == 2)
++      {
++        if (goal_check_strict_)
++        {
++          ROS_WARN("[EGO] Goal (%.2f, %.2f) REJECTED (fsm/goal_check_strict=true): %d/%d cells around it are UNKNOWN "
++                   "(never observed by the LiDAR), so the spot is NOT verifiably free. Pick a point already covered by "
++                   "the point cloud, or set fsm/goal_check_strict:=false.",
++                   end_wp(0), end_wp(1), bad_cells, total_cells);
++          visualization_->displayGoalPoint(end_wp, Eigen::Vector4d(1, 0, 0, 1), 0.4, 0);
++          return;
++        }
++        ROS_WARN("[EGO] Goal (%.2f, %.2f) ACCEPTED but NOT VERIFIED: %d/%d cells around it are UNKNOWN (never observed "
++                 "by the LiDAR), but the line of sight to it is clear. The planner treats unknown as free space and "
++                 "re-plans as it observes; the collision timer is the last safety net. Set fsm/goal_check_strict:=true to "
++                 "reject such goals.",
++                 end_wp(0), end_wp(1), bad_cells, total_cells);
++      }
++      else
++      {
++        if (goal_check_strict_)
++        {
++          ROS_WARN("[EGO] Goal (%.2f, %.2f) REJECTED (fsm/goal_check_strict=true): it is %.1f m away, outside the local "
++                   "map box (+-%.1f m) that the planner keeps updated, so the spot is NOT verifiably free. Move closer, "
++                   "or set fsm/goal_check_strict:=false.",
++                   end_wp(0), end_wp(1), (end_wp - odom_pos_).norm(), local_map_range_(0));
++          visualization_->displayGoalPoint(end_wp, Eigen::Vector4d(1, 0, 0, 1), 0.4, 0);
++          return;
++        }
++        ROS_WARN("[EGO] Goal (%.2f, %.2f) ACCEPTED but NOT VERIFIED: it is %.1f m away, outside the local map box "
++                 "(+-%.1f m), so the planner has no map information there yet, but the line of sight to it is clear. "
++                 "It will re-plan as it observes on the way; the collision timer is the last safety net. "
++                 "Set fsm/goal_check_strict:=true to reject such goals.",
++                 end_wp(0), end_wp(1), (end_wp - odom_pos_).norm(), local_map_range_(0));
++      }
++    }
++
++    ROS_INFO("[EGO] Goal (%.2f, %.2f) accepted (%d cells verified, safety check passed).", end_wp(0), end_wp(1), total_cells);
++
+     cout << "Triggered!" << endl;
+     // trigger_ = true;
+     init_pt_ = odom_pos_;
+ 
+-    Eigen::Vector3d end_wp(msg->pose.position.x, msg->pose.position.y, 1.0);
+-
+     planNextWaypoint(end_wp);
+   }
+ 
+diff --git a/src/uav_simulator/Utils/multi_map_server/CMakeLists.txt b/src/uav_simulator/Utils/multi_map_server/CMakeLists.txt
+index f467b0b..5544be7 100755
+--- a/src/uav_simulator/Utils/multi_map_server/CMakeLists.txt
++++ b/src/uav_simulator/Utils/multi_map_server/CMakeLists.txt
+@@ -164,7 +164,7 @@ add_executable(multi_map_visualization src/multi_map_visualization.cc)
+ 
+ ## Add cmake target dependencies of the executable/library
+ ## as an example, message headers may need to be generated before nodes
+-add_dependencies(multi_map_visualization multi_map_server_messages_cpp)
++add_dependencies(multi_map_visualization multi_map_server_generate_messages_cpp)
+ 
+ ## Specify libraries to link a library or executable target against
+ target_link_libraries(multi_map_visualization 

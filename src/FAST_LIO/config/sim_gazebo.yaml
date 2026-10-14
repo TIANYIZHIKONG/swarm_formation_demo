@@ -1,0 +1,35 @@
+common:
+    lid_topic:  "/drone_0/points"      # Gazebo 3D LiDAR (gazebo_ros_velodyne_*_laser) 发布的 PointCloud2
+    imu_topic:  "/drone_0/imu"         # Gazebo IMU (gazebo_ros_imu_sensor) 发布的 sensor_msgs/Imu
+    time_sync_en: false                # Gazebo 与 ROS 用同一个 /clock，不需要软同步
+    time_offset_lidar_to_imu: 0.0
+
+preprocess:
+    # 1 = Livox AVIA, 2 = Velodyne, 3 = Ouster, 4 = MARSIM(仅需 x,y,z[,intensity] 的 PointCloud2)
+    # Gazebo 出来的点云没有 ring/intensity，用 4 最省事
+    lidar_type: 4
+    scan_line: 16
+    blind: 0.3                         # 盲区，过滤掉打在机体/桨叶上的点
+
+mapping:
+    acc_cov: 0.1
+    gyr_cov: 0.1
+    b_acc_cov: 0.0001
+    b_gyr_cov: 0.0001
+    fov_degree:    360                 # 仿真里是 360° 机械式 LiDAR
+    det_range:     40.0
+    extrinsic_est_en:  false
+    extrinsic_T: [ 0.0, 0.0, 0.0 ]     # IMU 与 LiDAR 在同一位置（模型里已固连）
+    extrinsic_R: [ 1, 0, 0,
+                   0, 1, 0,
+                   0, 0, 1]
+
+publish:
+    path_en:  true
+    scan_publish_en:  true
+    dense_publish_en: false            # 仿真机 CPU 紧张时关掉稠密点云
+    scan_bodyframe_pub_en: true
+
+pcd_save:
+    pcd_save_en: false
+    interval: -1

@@ -1,0 +1,59 @@
+# rectangle formation yaml
+# global goal setting
+global_goal:
+  swarm_central_pos: {x: 25.0, y: 0.0, z: 1.0}
+  swarm_scale : 2.0
+  relative_pos_0 : {x: 0.0, y: 0.0, z: 0.0}
+  relative_pos_1 : {x: 1.7321, y: -1.0, z: 0.0}
+  relative_pos_2 : {x: 0.0, y: -2.0, z: 0.0}
+  relative_pos_3 : {x: -1.7321, y: -1.0, z: 0.0} 
+  relative_pos_4 : {x: -1.7321, y: 1.0, z: 0.0}
+  relative_pos_5 : {x: 0.0, y: 2.0, z: 0.0}
+  relative_pos_6 : {x: 1.7321, y: 1.0, z: 0.0} 
+  # relative_pos_6 : {x: 0, y: 0, z: 0.0} 
+
+# map_size_x          : 70.0
+# map_size_y          : 30.0
+# map_size_z          : 3.0
+optimization:
+  formation_type      : 1
+  weight_obstacle     : 50000.0
+  weight_swarm        : 50000.0
+  weight_feasibility  : 10000.0
+  weight_sqrvariance  : 10000.0
+  weight_time         : 80.0
+  weight_formation    : 15000.0
+  # obstacle_clearance: 软代价, 从**地图膨胀后**的障碍面量起 (ESDF)。
+  # 实际机体尺寸: 机身 0.47x0.47 (半宽 0.235), 但旋翼桨尖在 (±0.13, ±0.22)
+  # 处半径 0.128 -> 水平最大外伸 0.348 m, 对角 0.383 m。所以"整机半径"约 0.35 m。
+  # 复审(2026-10-13 第二轮, "撞障碍物"问题): 0.5 -> 0.7。
+  # 硬膨胀已由 0.2 提到 0.35 (实际硬边界 0.4 m), 软代价再给 0.7 -> 轨迹中心
+  # 距真实障碍面 ~1.1 m, 桨尖仍有 ~0.75 m 余量。第一轮 (inflation=0.3,
+  # clearance=0.5, 距真实面 ~0.8 m) 实测仍擦碰, 所以这次加大 soft 项。
+  # 风险: 0.8 m 窄缝两壁真实面间距 0.8 m, 0.7 的软代价在缝内会强烈激活,
+  # 多机穿林若出现"被推出缝 / 轨迹震荡", 用 0.5~0.6 回退。
+  # 第二轮实测 (2026-10-13, inflation=0.35/clearance=0.7/周期 0.3 s/max_vel 0.8):
+  #   场景A(目标在柱后, 直线必穿柱) 最小机体-柱面间距 0.805 m (余量 +0.457 m)
+  #   且顺利绕行到达(终点误差 6 cm); 场景B(目标在柱心) 余量 +0.863 m。
+  # 第三轮 (2026-10-13, 几何复现): 0.8 -> 0.3。
+  #   0.8 在本场景**数学上不可满足**: 它从膨胀面量起, 要两柱膨胀面之间 >= 2*0.8
+  #   = 1.6 m 才不激活惩罚; 而 formation.world 柱面最窄间隙仅 1.199 m
+  #   (inflation 0.35 后两柱膨胀面之间只剩 1.199 - 2*0.35 = 0.499 m)。
+  #   后果: 优化器在每处窄缝都处于强惩罚区, 只能把轨迹顶到硬边界上贴边走
+  #   (实测 too close 的相对时间中位数 0.617, 即障碍在轨迹末端才进图)。
+  #   0.3 -> 期望轨迹中心离膨胀面 0.3 m = 离真实柱面 0.65 m, 比机体含桨尖半径
+  #   0.348 m 多出 0.30 m 余量; 而 1.199 m 窄缝的中心点离柱面正好 0.60 m,
+  #   即"缝中心"落在无惩罚区 -> 优化器会主动往缝中间走, 而不是贴边。
+  obstacle_clearance  : 0.3
+  # swarm_clearance: 代码里构造成椭球距离 (z 半轴 = 1.5*clearance, xy 半轴 =
+  # 1.5*clearance), 即 0.5 时两机水平中心距只要 >= 0.75 m。两机桨尖相碰需要
+  # 2*0.348 = 0.70 m, 于是余量只有 5 cm -> 跟踪误差/延迟一来就"轻微碰撞"。
+  # (旧设置 1.0 对应水平中心距 1.5 m, 属激进值, 见下方复审。)
+  # 复审(2026-10-12): 取折中值 0.8 -> 两机水平中心距 1.2 m (桨尖接触距离 0.696 m,
+  # 余量 ~0.5 m)。1.0 太激进(实测会把机体推偏), 而 0.5 只有 5 cm 余量 —— 就是
+  # "轻微碰撞"的来源。FSM 侧的机间紧急阈值已改为
+  # max(0.696+0.15, 0.8*swarm_clearance) = 0.85 m > 0.70 m 物理接触距离。
+  swarm_clearance     : 1.0
+
+fsm:
+  replan_trajectory_time : 0.05    # s, the max time of replanning trajectory
